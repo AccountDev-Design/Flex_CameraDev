@@ -1,0 +1,26 @@
+# Gradle / Android build output
+.gradle/
+build/
+*/build/
+captures/
+.cxx/
+
+# Local configuration (contains SDK paths and must never be committed)
+local.properties
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Keys and secrets
+*.jks
+*.keystore
+keystore.properties
+secrets.properties
+google-services.json
+
+# Logs and temporary files
+*.log
+*.hprof
+*.tmp

@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">A55 Super Zoom</string>
+    <string name="app_title">A55 SUPER ZOOM</string>
+
+    <!-- Modos -->
+    <string name="mode_photo">FOTO</string>
+    <string name="mode_video">VIDEO</string>
+    <string name="mode_photo_description">Cambiar a modo fotografía</string>
+    <string name="mode_video_description">Cambiar a modo vídeo</string>
+
+    <!-- Panel superior -->
+    <string name="label_max_mp">MAX MP</string>
+    <string name="label_photo_target">Resolución solicitada: %1$s</string>
+    <string name="label_photo_target_unknown">Resolución solicitada: sin datos</string>
+    <string name="label_high_resolution">ALTA RESOLUCIÓN</string>
+    <string name="label_standard_resolution">RESOLUCIÓN ESTÁNDAR</string>
+    <string name="flash_auto">FLASH AUTO</string>
+    <string name="flash_on">FLASH SÍ</string>
+    <string name="flash_off">FLASH NO</string>
+    <string name="flash_unavailable">SIN FLASH</string>
+    <string name="torch_on">LINTERNA SÍ</string>
+    <string name="torch_off">LINTERNA NO</string>
+    <string name="mic_on">MIC SÍ</string>
+    <string name="mic_off">MIC NO</string>
+    <string name="stabilizer_on">EIS SÍ</string>
+    <string name="stabilizer_off">EIS NO</string>
+    <string name="stabilizer_unavailable">EIS N/D</string>
+
+    <!-- Zoom -->
+    <string name="zoom_source_camera">CÁMARA</string>
+    <string name="zoom_source_digital">DIGITAL EXPERIMENTAL</string>
+    <string name="zoom_slider_description">Deslizador de zoom, de 1× a 1000×</string>
+    <string name="zoom_quick_description">Zoom rápido %1$s</string>
+    <string name="zoom_value_description">Zoom actual %1$s</string>
+    <string name="zoom_warning">El Galaxy A55 no posee teleobjetivo 1000×. Por encima del límite de la cámara, la aplicación recorta y amplía la imagen. No puede recuperar detalles que el sensor no capturó.</string>
+    <string name="zoom_camera_limit">Límite de la cámara: %1$s</string>
+    <string name="save_original">Guardar también fotografía original</string>
+
+    <!-- Captura -->
+    <string name="shutter_photo_description">Tomar fotografía</string>
+    <string name="shutter_video_description">Iniciar o detener la grabación</string>
+    <string name="thumbnail_description">Abrir el último archivo guardado</string>
+    <string name="capture_processing">Procesando…</string>
+    <string name="capture_saving">Guardando…</string>
+    <string name="photo_vendor_limited">Samsung ha limitado esta captura a %1$s mediante las APIs disponibles.</string>
+    <string name="photo_digital_note">Recorte digital ×%1$s aplicado.</string>
+
+    <!-- Vídeo -->
+    <string name="quality_panel_title">CALIDAD DE VÍDEO</string>
+    <string name="recording_normal">NORMAL</string>
+    <string name="recording_high_speed">ALTA VELOCIDAD</string>
+    <string name="recording_unavailable">NO DISPONIBLE</string>
+    <string name="rec_indicator">REC</string>
+    <string name="recording_pause">Pausar</string>
+    <string name="recording_resume">Continuar</string>
+    <string name="recording_pause_unavailable">Este modo no admite pausa.</string>
+    <string name="notice_quality_recheck">CameraX no confirma %1$s en esta cámara; la opción se desactivó.</string>
+    <string name="free_space">Libre %1$s</string>
+    <string name="playback_real_time">Velocidad real</string>
+    <string name="playback_slow_motion">Cámara lenta</string>
+    <string name="playback_title">Reproducción de alta velocidad</string>
+    <string name="audio_row">Audio</string>
+    <string name="stabilization_row">Estabilización</string>
+    <string name="horizon_row">Horizon Lock</string>
+    <string name="resolution_row">Resolución</string>
+    <string name="fps_row">Fotogramas</string>
+    <string name="type_row">Tipo de grabación</string>
+    <string name="audio_high_speed_unavailable">El audio no está disponible en este modo de alta velocidad.</string>
+    <string name="high_speed_vendor_only">240 FPS no está disponible para aplicaciones externas en este dispositivo.</string>
+    <string name="high_speed_vendor_only_generic">Este modo de alta velocidad no está disponible para aplicaciones externas en este dispositivo.</string>
+
+    <!-- Motivos de no disponibilidad -->
+    <string name="reason_not_probed">Sin datos de la cámara.</string>
+    <string name="reason_size_unsupported">La cámara no publica esta resolución para grabar.</string>
+    <string name="reason_fps_unsupported">La cámara no publica esta cadencia de fotogramas.</string>
+    <string name="reason_encoder">Ningún codificador del sistema acepta esta combinación.</string>
+    <string name="reason_high_speed_unsupported">El dispositivo no expone sesiones de alta velocidad.</string>
+    <string name="reason_probe_failed">La consulta de capacidades falló.</string>
+
+    <!-- Horizonte -->
+    <string name="horizon_title">HORIZONTE</string>
+    <string name="horizon_off">DESACTIVADO</string>
+    <string name="horizon_leveling">NIVELACIÓN</string>
+    <string name="horizon_lock">HORIZON LOCK · EXPERIMENTAL</string>
+    <string name="horizon_status_level">NIVELADO</string>
+    <string name="horizon_status_correcting">CORRIGIENDO</string>
+    <string name="horizon_status_limit">LÍMITE DE RECORTE</string>
+    <string name="horizon_angle">%1$s°</string>
+    <string name="horizon_crop">Recorte aproximado %1$s%%</string>
+    <string name="horizon_guide_hide">Ocultar guía</string>
+    <string name="horizon_guide_show">Mostrar guía</string>
+    <string name="horizon_experimental_note">Modo experimental: mayor corrección y más recorte.</string>
+    <string name="horizon_no_sensor">Este dispositivo no expone sensores de rotación utilizables.</string>
+    <string name="horizon_high_speed">Las sesiones de alta velocidad no admiten el procesado del horizonte.</string>
+    <string name="horizon_performance">Corrección limitada para mantener el rendimiento en este modo.</string>
+    <string name="horizon_photo_only_guide">En modo fotografía la guía solo se muestra; el archivo no se rota.</string>
+
+    <!-- Avisos -->
+    <string name="notice_horizon_downgraded">El modo de horizonte se ajustó a una opción compatible.</string>
+    <string name="notice_horizon_unavailable">Ese modo de horizonte no está disponible aquí.</string>
+    <string name="notice_video_mode_changed">El modo de vídeo cambió a una opción que esta cámara confirma.</string>
+    <string name="notice_zoom_clamped">El zoom se ajustó al máximo permitido en este modo.</string>
+    <string name="notice_resolution_degraded">La resolución máxima no se pudo vincular; se usa la siguiente compatible.</string>
+    <string name="notice_mode_busy">Espera a que termine la operación en curso.</string>
+    <string name="notice_audio_denied">Sin permiso de micrófono: la grabación continuará sin audio.</string>
+    <string name="notice_audio_denied_forever">El permiso de micrófono está bloqueado. Actívalo en Ajustes si quieres audio.</string>
+    <string name="notice_saved_video">Vídeo guardado.</string>
+    <string name="notice_no_viewer">No hay ninguna aplicación para abrir este archivo.</string>
+    <string name="notice_media_missing">El archivo ya no está disponible.</string>
+
+    <!-- Errores -->
+    <string name="error_camera_permission">Se necesita el permiso de cámara.</string>
+    <string name="error_camera_start">CameraX no pudo iniciarse en este dispositivo.</string>
+    <string name="error_bind_failed">No se pudo configurar la cámara con esta combinación.</string>
+    <string name="error_storage_write">No se pudo escribir en el almacenamiento.</string>
+    <string name="error_no_space">No queda espacio suficiente.</string>
+    <string name="error_encoder">El codificador de vídeo falló.</string>
+    <string name="error_camera_lost">Se perdió el acceso a la cámara.</string>
+    <string name="error_recording_empty">La grabación no contiene datos válidos.</string>
+    <string name="error_recording_limit">Se alcanzó el límite de tamaño o duración.</string>
+    <string name="error_recording_generic">La grabación terminó con un error.</string>
+    <string name="error_high_speed_session">La sesión de alta velocidad no se pudo configurar.</string>
+    <string name="error_horizon_pipeline">El procesado del horizonte se detuvo; se desactivó.</string>
+    <string name="error_capture">La captura falló: %1$s</string>
+    <string name="error_focus">El enfoque no se pudo completar.</string>
+
+    <!-- Permisos -->
+    <string name="permission_camera_title">Permiso de cámara</string>
+    <string name="permission_camera_body">A55 Super Zoom necesita la cámara para mostrar la vista previa y capturar.</string>
+    <string name="permission_grant">Conceder</string>
+    <string name="permission_settings">Abrir ajustes</string>
+
+    <!-- Diagnóstico -->
+    <string name="diagnostics_title">Diagnóstico de cámara</string>
+    <string name="diagnostics_open">Diagnóstico</string>
+    <string name="diagnostics_main_camera">Cámara principal seleccionada</string>
+    <string name="diagnostics_logical_id">ID lógico</string>
+    <string name="diagnostics_max_jpeg">Resolución JPEG máxima</string>
+    <string name="diagnostics_high_res">Resoluciones JPEG de alta resolución</string>
+    <string name="diagnostics_video_sizes">Resoluciones de vídeo</string>
+    <string name="diagnostics_fps">Rangos de FPS (AE)</string>
+    <string name="diagnostics_high_speed">Alta velocidad</string>
+    <string name="diagnostics_zoom">Zoom mínimo y máximo</string>
+    <string name="diagnostics_flash">Flash</string>
+    <string name="diagnostics_ois">Estabilización óptica</string>
+    <string name="diagnostics_video_stabilization">Estabilización de vídeo</string>
+    <string name="diagnostics_physical">Sensores físicos expuestos</string>
+    <string name="diagnostics_hardware_level">Nivel de hardware</string>
+    <string name="diagnostics_sensor">Sensor</string>
+    <string name="diagnostics_imu">Fuente del horizonte</string>
+    <string name="diagnostics_modes">Modos de vídeo evaluados</string>
+    <string name="diagnostics_none">Sin datos</string>
+    <string name="diagnostics_yes">Sí</string>
+    <string name="diagnostics_no">No</string>
+    <string name="diagnostics_copy">Copiar informe</string>
+    <string name="diagnostics_copied">Informe copiado al portapapeles</string>
+    <string name="diagnostics_pending_title">Pruebas que requieren el teléfono</string>
+    <string name="diagnostics_pending_body">Estos puntos no se pueden verificar sin ejecutar la aplicación en un Galaxy A55 5G real:\n\n· Acceso real a 50 MP y resolución JPEG máxima obtenida.\n· Grabación 4K 30 sostenida.\n· FHD 60 estable.\n· HD 120 y HD 240 mediante sesión de alta velocidad.\n· Audio en modos de alta velocidad.\n· Cámaras físicas expuestas por la cámara lógica.\n· Comportamiento real del OIS.\n· Signo y suavidad de Horizon Lock.\n· Temperatura y consumo en grabaciones largas.\n· Calidad nocturna.\n· Estabilidad de MediaStore con archivos grandes.</string>
+
+    <!-- Información -->
+    <string name="info_title">Información</string>
+    <string name="info_body">A55 Super Zoom es una aplicación de cámara construida sobre CameraX y Camera2.\n\nQué hace realmente:\n· Fotografía a la mayor resolución JPEG que el dispositivo acepte vincular.\n· Zoom de cámara dentro del rango que la cámara declara.\n· Zoom digital experimental por encima de ese rango, recortando y ampliando.\n· Vídeo en los modos que el dispositivo y el codificador confirman.\n· Nivelación y bloqueo de horizonte mediante la IMU y un paso de GPU.\n\nQué no hace:\n· No inventa detalle: por encima del límite óptico solo hay recorte y ampliación.\n· No añade modos que el dispositivo no publique.\n· No utiliza APIs privadas ni servicios externos.</string>
+    <string name="info_close">Cerrar</string>
+
+    <!-- Accesibilidad -->
+    <string name="cd_preview">Vista previa de la cámara</string>
+    <string name="cd_flash_button">Modo de flash</string>
+    <string name="cd_mic_button">Micrófono</string>
+    <string name="cd_stabilizer_button">Estabilización de vídeo</string>
+    <string name="cd_info_button">Información y diagnóstico</string>
+    <string name="cd_grid_button">Cuadrícula de encuadre</string>
+    <string name="cd_horizon_button">Modo de horizonte</string>
+    <string name="cd_quality_button">Calidad de vídeo</string>
+    <string name="cd_close_panel">Cerrar panel</string>
+</resources>

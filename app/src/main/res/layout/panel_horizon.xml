@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.flex.cameradev.ui.views.LiquidGlassPanel xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:padding="@dimen/panel_padding">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                style="@style/Text.Label"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/horizon_title" />
+
+            <ImageButton
+                android:id="@+id/horizonCloseButton"
+                android:layout_width="@dimen/touch_target"
+                android:layout_height="@dimen/touch_target"
+                android:background="@drawable/bg_circle_button"
+                android:contentDescription="@string/cd_close_panel"
+                android:padding="13dp"
+                android:src="@drawable/ic_close" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/horizonOffChip"
+            style="@style/Text.Body"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/touch_target"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_chip"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="14dp"
+            android:text="@string/horizon_off" />
+
+        <TextView
+            android:id="@+id/horizonLevelChip"
+            style="@style/Text.Body"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/touch_target"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="14dp"
+            android:text="@string/horizon_leveling" />
+
+        <TextView
+            android:id="@+id/horizonLockChip"
+            style="@style/Text.Body"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/touch_target"
+            android:layout_marginTop="6dp"
+            android:background="@drawable/bg_chip"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="14dp"
+            android:text="@string/horizon_lock" />
+
+        <TextView
+            android:id="@+id/horizonPanelNote"
+            style="@style/Text.Caption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp" />
+
+        <TextView
+            android:id="@+id/horizonGuideToggle"
+            style="@style/Text.Body"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/touch_target"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_chip"
+            android:gravity="center"
+            android:text="@string/horizon_guide_hide" />
+    </LinearLayout>
+</com.flex.cameradev.ui.views.LiquidGlassPanel>

@@ -1,0 +1,507 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/surface_black"
+    android:fitsSystemWindows="true">
+
+    <FrameLayout
+        android:id="@+id/previewContainer"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:clipChildren="true"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <androidx.camera.view.PreviewView
+            android:id="@+id/previewView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="@string/cd_preview" />
+
+        <SurfaceView
+            android:id="@+id/highSpeedPreview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+        <com.flex.cameradev.ui.views.GridOverlayView
+            android:id="@+id/gridOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+        <com.flex.cameradev.ui.views.HorizonOverlayView
+            android:id="@+id/horizonOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <com.flex.cameradev.ui.views.FocusRingView
+            android:id="@+id/focusRing"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <View
+            android:id="@+id/flashOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/shutter_white"
+            android:alpha="0"
+            android:importantForAccessibility="no" />
+    </FrameLayout>
+
+    <com.flex.cameradev.ui.views.LiquidGlassPanel
+        android:id="@+id/topPanel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_margin="@dimen/panel_margin"
+        android:padding="@dimen/panel_padding"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/titleText"
+                    style="@style/Text.Label"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/app_title" />
+
+                <ImageButton
+                    android:id="@+id/infoButton"
+                    android:layout_width="@dimen/touch_target"
+                    android:layout_height="@dimen/touch_target"
+                    android:background="@drawable/bg_circle_button"
+                    android:contentDescription="@string/cd_info_button"
+                    android:padding="12dp"
+                    android:src="@drawable/ic_info" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/modeSummary"
+                    style="@style/Text.Body"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/label_max_mp" />
+
+                <ImageButton
+                    android:id="@+id/flashButton"
+                    android:layout_width="@dimen/touch_target"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/bg_circle_button"
+                    android:contentDescription="@string/cd_flash_button"
+                    android:padding="12dp"
+                    android:src="@drawable/ic_flash_auto" />
+
+                <ImageButton
+                    android:id="@+id/micButton"
+                    android:layout_width="@dimen/touch_target"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/bg_circle_button"
+                    android:contentDescription="@string/cd_mic_button"
+                    android:padding="12dp"
+                    android:src="@drawable/ic_mic_on" />
+
+                <ImageButton
+                    android:id="@+id/stabilizerButton"
+                    android:layout_width="@dimen/touch_target"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/bg_circle_button"
+                    android:contentDescription="@string/cd_stabilizer_button"
+                    android:padding="12dp"
+                    android:src="@drawable/ic_stabilizer" />
+
+                <ImageButton
+                    android:id="@+id/gridButton"
+                    android:layout_width="@dimen/touch_target"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/bg_circle_button"
+                    android:contentDescription="@string/cd_grid_button"
+                    android:padding="12dp"
+                    android:src="@drawable/ic_grid" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/resolutionHint"
+                style="@style/Text.Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp" />
+        </LinearLayout>
+    </com.flex.cameradev.ui.views.LiquidGlassPanel>
+
+    <LinearLayout
+        android:id="@+id/recordingChip"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:background="@drawable/bg_notice"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="7dp"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/topPanel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <View
+            android:id="@+id/recDot"
+            android:layout_width="9dp"
+            android:layout_height="9dp"
+            android:background="@drawable/bg_circle_button"
+            android:backgroundTint="@color/record_red"
+            android:importantForAccessibility="no" />
+
+        <TextView
+            android:id="@+id/recLabel"
+            style="@style/Text.Label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:textColor="@color/record_red"
+            android:text="@string/rec_indicator" />
+
+        <TextView
+            android:id="@+id/recTimer"
+            style="@style/Text.Body"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:text="00:00" />
+
+        <TextView
+            android:id="@+id/recSize"
+            style="@style/Text.Caption"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/pauseButton"
+        style="@style/Text.Body"
+        android:layout_width="wrap_content"
+        android:layout_height="@dimen/touch_target"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/bg_chip"
+        android:gravity="center"
+        android:minWidth="120dp"
+        android:paddingHorizontal="14dp"
+        android:text="@string/recording_pause"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/recordingChip"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <ProgressBar
+        android:id="@+id/processingIndicator"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:indeterminateTint="@color/accent_cyan"
+        android:visibility="gone"
+        app:layout_constraintTop_toTopOf="@id/previewContainer"
+        app:layout_constraintBottom_toBottomOf="@id/previewContainer"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <TextView
+        android:id="@+id/noticeBanner"
+        style="@style/Text.Body"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="@dimen/panel_margin"
+        android:layout_marginBottom="8dp"
+        android:background="@drawable/bg_notice"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="10dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@id/bottomPanel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <com.flex.cameradev.ui.views.LiquidGlassPanel
+        android:id="@+id/bottomPanel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_margin="@dimen/panel_margin"
+        android:padding="@dimen/panel_padding"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:baselineAligned="false"
+                android:gravity="bottom"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/zoomValue"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/text_primary"
+                    android:textSize="@dimen/text_value"
+                    android:text="1×" />
+
+                <TextView
+                    android:id="@+id/zoomSource"
+                    style="@style/Text.Label"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="10dp"
+                    android:layout_marginBottom="4dp"
+                    android:layout_weight="1"
+                    android:text="@string/zoom_source_camera" />
+
+                <TextView
+                    android:id="@+id/zoomLimit"
+                    style="@style/Text.Caption"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="4dp"
+                    android:gravity="end" />
+            </LinearLayout>
+
+            <com.flex.cameradev.ui.views.ZoomSlider
+                android:id="@+id/zoomSlider"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/zoom_slider_height"
+                android:layout_marginTop="4dp"
+                android:paddingHorizontal="12dp" />
+
+            <LinearLayout
+                android:id="@+id/quickZoomRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/quickZoom1"
+                    style="@style/Text.Body"
+                    android:layout_width="0dp"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_chip"
+                    android:gravity="center"
+                    android:text="1×" />
+
+                <TextView
+                    android:id="@+id/quickZoom3"
+                    style="@style/Text.Body"
+                    android:layout_width="0dp"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_chip"
+                    android:gravity="center"
+                    android:text="3×" />
+
+                <TextView
+                    android:id="@+id/quickZoom10"
+                    style="@style/Text.Body"
+                    android:layout_width="0dp"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_chip"
+                    android:gravity="center"
+                    android:text="10×" />
+
+                <TextView
+                    android:id="@+id/quickZoom100"
+                    style="@style/Text.Body"
+                    android:layout_width="0dp"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_chip"
+                    android:gravity="center"
+                    android:text="100×" />
+
+                <TextView
+                    android:id="@+id/quickZoom1000"
+                    style="@style/Text.Body"
+                    android:layout_width="0dp"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_chip"
+                    android:gravity="center"
+                    android:text="1000×" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/qualityButton"
+                    style="@style/Text.Body"
+                    android:layout_width="0dp"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_marginEnd="8dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_chip"
+                    android:contentDescription="@string/cd_quality_button"
+                    android:drawableStart="@drawable/ic_quality"
+                    android:drawablePadding="8dp"
+                    android:gravity="center"
+                    android:paddingHorizontal="10dp"
+                    android:text="@string/quality_panel_title" />
+
+                <TextView
+                    android:id="@+id/horizonButton"
+                    style="@style/Text.Body"
+                    android:layout_width="0dp"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_chip"
+                    android:contentDescription="@string/cd_horizon_button"
+                    android:drawableStart="@drawable/ic_horizon"
+                    android:drawablePadding="8dp"
+                    android:gravity="center"
+                    android:paddingHorizontal="10dp"
+                    android:text="@string/horizon_off" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/horizonStatus"
+                style="@style/Text.Caption"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_chip"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/photoTab"
+                    style="@style/Text.Label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="@dimen/touch_target"
+                    android:contentDescription="@string/mode_photo_description"
+                    android:gravity="center"
+                    android:minWidth="96dp"
+                    android:text="@string/mode_photo" />
+
+                <TextView
+                    android:id="@+id/videoTab"
+                    style="@style/Text.Label"
+                    android:layout_width="wrap_content"
+                    android:layout_height="@dimen/touch_target"
+                    android:contentDescription="@string/mode_video_description"
+                    android:gravity="center"
+                    android:minWidth="96dp"
+                    android:text="@string/mode_video" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageButton
+                    android:id="@+id/thumbnailButton"
+                    android:layout_width="@dimen/thumbnail_size"
+                    android:layout_height="@dimen/thumbnail_size"
+                    android:background="@drawable/bg_thumbnail"
+                    android:contentDescription="@string/thumbnail_description"
+                    android:padding="8dp"
+                    android:scaleType="centerCrop"
+                    android:src="@drawable/ic_chevron" />
+
+                <Space
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <com.flex.cameradev.ui.views.ShutterButton
+                    android:id="@+id/shutterButton"
+                    android:layout_width="@dimen/shutter_size"
+                    android:layout_height="@dimen/shutter_size" />
+
+                <Space
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <TextView
+                    android:id="@+id/saveOriginalToggle"
+                    style="@style/Text.Caption"
+                    android:layout_width="wrap_content"
+                    android:layout_height="@dimen/touch_target"
+                    android:background="@drawable/bg_chip"
+                    android:gravity="center"
+                    android:maxWidth="110dp"
+                    android:paddingHorizontal="10dp"
+                    android:text="@string/save_original" />
+            </LinearLayout>
+        </LinearLayout>
+    </com.flex.cameradev.ui.views.LiquidGlassPanel>
+
+    <include
+        android:id="@+id/qualityPanel"
+        layout="@layout/panel_quality"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_margin="@dimen/panel_margin"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <include
+        android:id="@+id/horizonPanel"
+        layout="@layout/panel_horizon"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_margin="@dimen/panel_margin"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+</androidx.constraintlayout.widget.ConstraintLayout>
