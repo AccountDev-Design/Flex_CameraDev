@@ -21,12 +21,12 @@
 // y el preview a 800x600, porque a 5 MP no hay vídeo fluido que prometer.
 // ---------------------------------------------------------------------
 const FcModeSpec FC_MODES[FC_MODE_COUNT] = {
-  // id            label                  preview            capture          qP  qC fb  hz
-  { "photo5mp", "Foto 5 MP",        FRAMESIZE_SVGA,  FRAMESIZE_QSXGA,  12,  8, 2, false },
-  { "hiq",      "Alta calidad",     FRAMESIZE_UXGA,  FRAMESIZE_UXGA,   10, 10, 2, false },
-  { "fluid",    "Vista fluida",     FRAMESIZE_SVGA,  FRAMESIZE_SVGA,   12, 10, 2, false },
-  { "hlock",    "Horizon Lock",     FRAMESIZE_SVGA,  FRAMESIZE_SVGA,   12, 10, 2, true  },
-  { "hlockul",  "Horizon Lock Ultra", FRAMESIZE_VGA, FRAMESIZE_VGA,    14, 10, 2, true  },
+  // id            label                  preview            capture          qP  qC hz
+  { "photo5mp", "Foto 5 MP",        FRAMESIZE_SVGA,  FRAMESIZE_QSXGA,  12,  8, false },
+  { "hiq",      "Alta calidad",     FRAMESIZE_UXGA,  FRAMESIZE_UXGA,   10, 10, false },
+  { "fluid",    "Vista fluida",     FRAMESIZE_SVGA,  FRAMESIZE_SVGA,   12, 10, false },
+  { "hlock",    "Horizon Lock",     FRAMESIZE_SVGA,  FRAMESIZE_SVGA,   12, 10, true  },
+  { "hlockul",  "Horizon Lock Ultra", FRAMESIZE_VGA, FRAMESIZE_VGA,    14, 10, true  },
 };
 
 static SemaphoreHandle_t s_camMutex = nullptr;
@@ -41,10 +41,9 @@ static uint32_t s_frames    = 0;   // protegido por s_statLock
 static uint32_t s_dropped   = 0;   // protegido por s_statLock
 static char     s_lastError[64]      = {0};
 // Copia local de lo que expone la web. Se refresca dentro de secciones ya
-// protegidas, para no leer el estado interno del driver mientras se
-// reconfigura (deinit+init libera esa estructura).
+// protegidas para no leer el estado interno mientras cambia el sensor.
 static uint16_t s_curW = 0, s_curH = 0;
-static bool     s_vflip = false, s_hmirror = false, s_afSupported = false;
+static bool     s_vflip = false, s_hmirror = false;
 
 // Ventana móvil para los FPS reales.
 static uint32_t s_fpsWindowStart = 0;
@@ -52,6 +51,7 @@ static uint32_t s_fpsWindowCount = 0;
 static float    s_fps            = 0.0f;
 
 static camera_config_t s_cfg;
+static framesize_t s_bufferMaxFs = FRAMESIZE_INVALID;
 
 static void setError(const char* msg) {
   if (!msg) { s_lastError[0] = 0; return; }
@@ -104,7 +104,46 @@ static void refreshCache() {
   }
   s_vflip       = s->status.vflip != 0;
   s_hmirror     = s->status.hmirror != 0;
-  s_afSupported = (s->af_is_supported && s->af_is_supported(s) > 0);
+}
+
+static void applySensorTweaks(framesize_t fs);
+
+// Cambia resolución/calidad usando únicamente la API pública y estable de
+// sensor_t. Los framebuffers se reservan una sola vez al arrancar para QSXGA,
+// por lo que después se puede alternar entre preview y foto sin deinit/init.
+// Debe llamarse siempre con el mutex de cámara tomado.
+static bool configureSensor(framesize_t fs, int quality,
+                            char* errOut, size_t errLen) {
+  if (s_bufferMaxFs != FRAMESIZE_INVALID && fs > s_bufferMaxFs) {
+    if (errOut) snprintf(errOut, errLen, "resolución requiere PSRAM activa");
+    return false;
+  }
+  sensor_t* s = esp_camera_sensor_get();
+  if (!s || !s->set_framesize || !s->set_quality) {
+    if (errOut) snprintf(errOut, errLen, "controlador de cámara incompleto");
+    return false;
+  }
+
+  const framesize_t oldFs = s->status.framesize;
+  const int oldQuality = s->status.quality;
+
+  if (s->set_framesize(s, fs) != 0) {
+    if (errOut) snprintf(errOut, errLen, "no se pudo cambiar resolución");
+    return false;
+  }
+  if (s->set_quality(s, quality) != 0) {
+    // Restauración de mejor esfuerzo: no dejar el sensor a medias.
+    s->set_framesize(s, oldFs);
+    s->set_quality(s, oldQuality);
+    refreshCache();
+    if (errOut) snprintf(errOut, errLen, "no se pudo cambiar calidad JPEG");
+    return false;
+  }
+
+  s_cfg.frame_size = fs;
+  s_cfg.jpeg_quality = quality;
+  applySensorTweaks(fs);
+  return true;
 }
 
 static void applySensorTweaks(framesize_t fs) {
@@ -137,14 +176,20 @@ bool fcCameraBegin() {
   if (!s_camMutex) { setError("sin memoria para el mutex"); return false; }
 
   const FcModeSpec* spec = &FC_MODES[FC_MODE_DEFAULT];
-  uint8_t fb = psramFound() ? spec->fbCount : 1;
-  if (!psramFound()) {
+  const bool hasPsram = psramFound();
+  const uint8_t fb = hasPsram ? 2 : 1;
+  if (!hasPsram) {
     Serial.println(F("[CAM] AVISO: no se detecta PSRAM. Sin PSRAM el OV5640 no "
                      "puede pasar de resoluciones bajas. Revisa que en el IDE "
                      "esté 'PSRAM: OPI PSRAM'."));
   }
 
-  fillConfig(s_cfg, spec->preview, spec->previewQuality, fb);
+  // Con PSRAM se reserva desde el inicio para QSXGA. Esto es intencional:
+  // set_framesize() puede reducir/aumentar luego la salida del sensor sin
+  // necesitar la API no pública esp_camera_reconfigure().
+  const framesize_t initialFs = hasPsram ? FRAMESIZE_QSXGA : spec->preview;
+  s_bufferMaxFs = initialFs;
+  fillConfig(s_cfg, initialFs, spec->previewQuality, fb);
   esp_err_t err = esp_camera_init(&s_cfg);
   if (err != ESP_OK) {
     char b[64];
@@ -167,7 +212,16 @@ bool fcCameraBegin() {
                        "modos de 5 MP no funcionarán con este sensor."));
     }
   }
-  applySensorTweaks(spec->preview);
+  if (initialFs != spec->preview &&
+      !configureSensor(spec->preview, spec->previewQuality, nullptr, 0)) {
+    setError("no se pudo configurar el preview inicial");
+    Serial.println(F("[CAM] No se pudo seleccionar la resolución inicial."));
+    esp_camera_deinit();
+    s_ready = false;
+    return false;
+  } else if (initialFs == spec->preview) {
+    applySensorTweaks(spec->preview);
+  }
   settle(FC_SETTLE_FRAMES);
 
   s_mode  = FC_MODE_DEFAULT;
@@ -191,28 +245,6 @@ void fcCameraUnlock() {
 uint32_t fcCameraStreamGen() { return s_streamGen.load(std::memory_order_relaxed); }
 void     fcCameraBumpStreamGen() { s_streamGen.fetch_add(1, std::memory_order_relaxed); }
 
-// Reconfigura el driver. Debe llamarse con el mutex tomado y sin ningún
-// frame buffer prestado: esp_camera_reconfigure() hace deinit + init.
-static bool reconfigure(framesize_t fs, int quality, uint8_t fbCount,
-                        char* errOut, size_t errLen) {
-  esp_camera_return_all();
-  camera_config_t cfg;
-  fillConfig(cfg, fs, quality, fbCount);
-  esp_err_t err = esp_camera_reconfigure(&cfg);
-  if (err != ESP_OK) {
-    if (errOut) snprintf(errOut, errLen, "reconfigurar cámara falló: 0x%x", (int)err);
-    // Intento de vuelta al modo anterior para no dejar la cámara muerta.
-    if (esp_camera_reconfigure(&s_cfg) != ESP_OK) {
-      s_ready = false;
-      setError("cámara caída tras un cambio de modo");
-    }
-    return false;
-  }
-  s_cfg = cfg;
-  applySensorTweaks(fs);
-  return true;
-}
-
 bool fcCameraSetMode(FcMode m, char* errOut, size_t errLen) {
   if (m < 0 || m >= FC_MODE_COUNT) {
     if (errOut) snprintf(errOut, errLen, "modo desconocido");
@@ -235,8 +267,9 @@ bool fcCameraSetMode(FcMode m, char* errOut, size_t errLen) {
     return false;
   }
 
-  uint8_t fb = psramFound() ? spec->fbCount : 1;
-  bool ok = reconfigure(spec->preview, spec->previewQuality, fb, errOut, errLen);
+  // Guardar el modo anterior por si el sensor rechaza el cambio.
+  const FcModeSpec* oldSpec = &FC_MODES[s_mode];
+  bool ok = configureSensor(spec->preview, spec->previewQuality, errOut, errLen);
   if (ok) {
     settle(FC_SETTLE_FRAMES);
     s_mode = m;
@@ -244,6 +277,10 @@ bool fcCameraSetMode(FcMode m, char* errOut, size_t errLen) {
     s_fps = 0.0f; s_fpsWindowCount = 0; s_fpsWindowStart = millis();
     portEXIT_CRITICAL(&s_statLock);
     setError(nullptr);
+  } else {
+    // configureSensor ya revierte en caso de fallo de calidad. Esta segunda
+    // restauración cubre sensores que alteren parcialmente el tamaño.
+    configureSensor(oldSpec->preview, oldSpec->previewQuality, nullptr, 0);
   }
   fcCameraUnlock();
   return ok;
@@ -313,9 +350,8 @@ void fcCameraClientExit() {
 static void restorePreview() {
   const FcModeSpec* spec = &FC_MODES[s_mode];
   if (spec->capture == spec->preview && spec->captureQuality == spec->previewQuality) return;
-  uint8_t fbc = psramFound() ? spec->fbCount : 1;
   char err[64];
-  if (reconfigure(spec->preview, spec->previewQuality, fbc, err, sizeof(err))) {
+  if (configureSensor(spec->preview, spec->previewQuality, err, sizeof(err))) {
     settle(1);
   } else {
     Serial.printf("[CAM] %s\n", err);
@@ -340,9 +376,9 @@ camera_fb_t* fcCameraCapture(char* errOut, size_t errLen) {
   }
 
   if (needSwitch) {
-    // A 5 MP se usa un solo buffer: el JPEG de 2592x1944 cabe de sobra en
-    // PSRAM, pero reservar dos buffers de ese tamano es un pico inutil.
-    if (!reconfigure(spec->capture, spec->captureQuality, 1, errOut, errLen)) {
+    // Los buffers para QSXGA ya se reservaron al arrancar. Aquí sólo cambia
+    // la salida del sensor, sin liberar memoria ni reinicializar la cámara.
+    if (!configureSensor(spec->capture, spec->captureQuality, errOut, errLen)) {
       restorePreview();
       fcCameraUnlock();
       return nullptr;
@@ -388,12 +424,11 @@ bool fcCameraGetFlip(bool* vflip, bool* hmirror) {
   return s_ready;
 }
 
-bool fcCameraAutofocusSupported() { return s_afSupported; }
+// El sensor_t incluido en varias versiones estables de Arduino-ESP32 no expone
+// la API de autofocus. Mantenerla desactivada evita depender de headers nuevos;
+// el stream y las capturas continúan funcionando con lentes fijas o AF pasivo.
+bool fcCameraAutofocusSupported() { return false; }
 
 bool fcCameraTriggerAutofocus() {
-  if (!s_ready || !fcCameraLock(1500)) return false;
-  sensor_t* s = esp_camera_sensor_get();
-  bool ok = (s && s->af_trigger) ? (s->af_trigger(s) >= 0) : false;
-  fcCameraUnlock();
-  return ok;
+  return false;
 }
