@@ -13,7 +13,10 @@ recomprime un fotograma.
 
 ## 1. Qué se ha verificado (y qué no)
 
-Compilado de verdad con `arduino-cli 1.2.0` + core **esp32 3.3.11**:
+La versión original se compiló con `arduino-cli 1.2.0` + core **esp32 3.3.11**.
+La gestión de cámara actual usa sólo la API pública de `esp_camera.h` y
+`sensor_t`: no depende de `esp_camera_reconfigure()` ni de los miembros de
+autofocus que faltan en algunas versiones empaquetadas con Arduino-ESP32.
 
 ```
 Sketch uses 1034123 bytes (32%) of program storage space. Maximum is 3145728 bytes.
@@ -209,13 +212,13 @@ no congele los botones.
 
 ## 5. Modos y rendimiento
 
-| Modo | Preview | Captura | FPS estimado | Buffers en PSRAM |
+| Modo | Preview | Captura | FPS estimado | Buffers reservados |
 |---|---|---|---|---|
-| Foto 5 MP | 800×600 | **2560×1920** | preview 20–30 | 2×94 KB, disparo 1×960 KB |
-| Alta calidad | 1600×1200 | 1600×1200 | 8–15 | 2×375 KB |
-| Vista fluida | 800×600 | 800×600 | 20–30 | 2×94 KB |
-| Horizon Lock | 800×600 | 800×600 | 20–30 | 2×94 KB |
-| Horizon Lock Ultra | 640×480 | 640×480 | 25–40 | 2×60 KB |
+| Foto 5 MP | 800×600 | **2560×1920** | preview 20–30 | 2 buffers QSXGA en PSRAM |
+| Alta calidad | 1600×1200 | 1600×1200 | 8–15 | 2 buffers QSXGA en PSRAM |
+| Vista fluida | 800×600 | 800×600 | 20–30 | 2 buffers QSXGA en PSRAM |
+| Horizon Lock | 800×600 | 800×600 | 20–30 | 2 buffers QSXGA en PSRAM |
+| Horizon Lock Ultra | 640×480 | 640×480 | 25–40 | 2 buffers QSXGA en PSRAM |
 
 **De dónde salen esos números y qué valen.** Los tamaños de buffer **sí son
 exactos**: el driver reserva `ancho × alto / 5` bytes por buffer en modo JPEG
@@ -311,10 +314,10 @@ Selector **0° / 90° / 180° / 270° / 360°**, independiente del IMU.
 | El BNO085 se reinicia solo | Se detecta con `wasReset()` y se vuelven a pedir los informes. |
 | Cámara no detectada al arrancar | Se avisa por serie con las causas típicas y se reintenta cada 30 s. **No se reinicia la placa en bucle.** |
 | Cliente web que se va | `close_fn` del servidor limpia el descriptor; `lru_purge_enable` recicla sockets muertos. La tarea de telemetría se duerme si no hay nadie mirando. |
-| Cambio de modo con el stream vivo | Se sube un contador de generación: los handlers MJPEG salen limpios, se toma el mutex, se reconfigura y la web reengancha. Nunca se queda colgado. |
-| Cambio de modo mientras otro reconfigura | El segundo espera hasta 4 s y, si no, responde "cámara ocupada" en vez de romper nada. |
-| Fallo al reconfigurar | Se intenta volver al modo anterior; si tampoco, se marca la cámara como caída y se dice en la web. |
-| Sin PSRAM | Aviso explícito por serie y `fb_count` baja a 1 en vez de fallar sin explicación. |
+| Cambio de modo con el stream vivo | Se sube un contador de generación: los handlers MJPEG salen limpios, se toma el mutex, cambia el sensor y la web reengancha. |
+| Cambio de modo mientras otro cambia el sensor | El segundo espera hasta 4 s y, si no, responde "cámara ocupada" en vez de romper nada. |
+| Fallo al cambiar resolución/calidad | Se restaura el último modo válido y se informa a la web. |
+| Sin PSRAM | Aviso explícito por serie y un solo framebuffer; los modos altos pueden no estar disponibles. |
 
 Ningún `delay()` en las rutas de vídeo, IMU o telemetría; sólo uno de 50 ms en
 `loop()`, que no hace trabajo real. Ninguna operación cara dentro de un
