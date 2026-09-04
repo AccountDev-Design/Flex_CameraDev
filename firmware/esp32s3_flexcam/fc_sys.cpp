@@ -51,8 +51,19 @@ bool fcSysWifiAP() {
   esp_wifi_set_protocol(WIFI_IF_AP,
       WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
   esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);
+  esp_err_t txErr = esp_wifi_set_max_tx_power(FC_WIFI_TX_POWER_QDBM);
+  if (txErr != ESP_OK) {
+    Serial.printf("[AP] No se pudo limitar potencia TX: 0x%x\n", (int)txErr);
+  }
 
-  Serial.printf("[AP] SSID=%s  canal=%d  IP=%s\n",
-                FC_AP_SSID, FC_AP_CHANNEL, WiFi.softAPIP().toString().c_str());
+  Serial.printf("[AP] SSID=%s  canal=%d  TX=%.2f dBm  IP=%s\n",
+                FC_AP_SSID, FC_AP_CHANNEL, FC_WIFI_TX_POWER_QDBM / 4.0f,
+                WiFi.softAPIP().toString().c_str());
   return true;
+}
+
+float fcSysTemperatureC() {
+  // Sensor interno del SoC: sirve para tendencias y protección, no equivale
+  // a medir con termopar el regulador, la PSRAM o la carcasa metálica.
+  return temperatureRead();
 }

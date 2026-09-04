@@ -13,6 +13,9 @@
 #define FC_AP_PASSWORD    "FlexCam2026"      // WPA2, mínimo 8 caracteres
 #define FC_AP_CHANNEL     6                  // 1, 6 u 11 suelen ser los más limpios
 #define FC_AP_MAX_CLIENTS 4
+// 60 unidades de 0,25 dBm = 15 dBm. Es potencia suficiente a corta/media
+// distancia y disipa bastante menos que los 20 dBm máximos por defecto.
+#define FC_WIFI_TX_POWER_QDBM 60
 #define FC_AP_IP_1        192
 #define FC_AP_IP_2        168
 #define FC_AP_IP_3        4
@@ -164,14 +167,31 @@
 // 5. Modos de cámara
 // ---------------------------------------------------------------------
 enum FcMode {
-  FC_MODE_PHOTO5MP = 0,   // preview 800x600, disparo a 2592x1944
-  FC_MODE_HIQ      = 1,   // preview 1600x1200
-  FC_MODE_FLUID    = 2,   // preview 800x600
-  FC_MODE_HLOCK    = 3,   // preview 800x600 + Horizon Lock
-  FC_MODE_HLOCK_UL = 4,   // preview 640x480 + Horizon Lock, máxima prioridad a FPS
-  FC_MODE_COUNT    = 5
+  FC_MODE_PHOTO5MP = 0,   // preview 800x600, disparo a la máxima resolución real
+  FC_MODE_LIVE5MP  = 1,   // máxima resolución en vivo, deliberadamente pocos FPS
+  FC_MODE_HIQ      = 2,   // preview 1600x1200
+  FC_MODE_FLUID    = 3,   // preview 800x600
+  FC_MODE_HLOCK    = 4,   // preview 800x600 + Horizon Lock
+  FC_MODE_HLOCK_UL = 5,   // preview 640x480 + Horizon Lock, máxima prioridad a FPS
+  FC_MODE_COUNT    = 6
 };
 #define FC_MODE_DEFAULT  FC_MODE_FLUID
+
+// El productor de cámara conserva sólo los fotogramas más nuevos en PSRAM.
+// Si todos están siendo enviados a clientes lentos, descarta el recién
+// capturado: nunca acumula latencia ni deja el sensor preso del Wi-Fi.
+#define FC_STREAM_POOL_SLOTS       3
+#define FC_STREAM_SLOT_HEADROOM    (32 * 1024)
+#define FC_CAMERA_TASK_STACK       6144
+#define FC_CAMERA_IDLE_WAIT_MS     120
+
+// Protección térmica basada en el sensor interno del ESP32-S3. Es una medida
+// aproximada del chip, no de la superficie del regulador ni de la cámara.
+#define FC_THERMAL_SAMPLE_MS       2000
+#define FC_THERMAL_THROTTLE_C      75.0f
+#define FC_THERMAL_CRITICAL_C      85.0f
+#define FC_THERMAL_THROTTLE_FPS    15
+#define FC_THERMAL_CRITICAL_FPS    5
 
 // Fotogramas que se descartan tras cambiar de resolución para que el OV5640
 // asiente exposición/balance y no salga el típico primer frame verde.

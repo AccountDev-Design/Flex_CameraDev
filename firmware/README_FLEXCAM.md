@@ -17,8 +17,8 @@ Compilado de verdad con `arduino-cli 1.2.0` + core **esp32 3.3.11** +
 **SparkFun BNO08x 1.0.6**, con la misma configuración que usarás en el IDE:
 
 ```
-Sketch uses 1063435 bytes (33%) of program storage space. Maximum is 3145728 bytes.
-Global variables use 60988 bytes (18%) of dynamic memory, leaving 266692 bytes
+Sketch uses 1068259 bytes (33%) of program storage space. Maximum is 3145728 bytes.
+Global variables use 61148 bytes (18%) of dynamic memory, leaving 266532 bytes
 for local variables. Maximum is 327680 bytes.
 ```
 
@@ -45,6 +45,25 @@ También se verifica midiendo píxeles que **el JPEG estabilizado descargado**
 está realmente girado (0,00° de inclinación dentro del archivo) mientras la
 foto original se conserva intacta (29,99°), y que la grabación produce un
 archivo real (MP4 de 34 KB en la prueba) que se descarga solo.
+
+### Trabajo fusionado, no sobrescrito
+
+Mientras se hacía esto, otra sesión subió cuatro commits a la misma rama.
+**No se han pisado.** Este commit es una fusión que se queda con lo mejor de
+cada lado:
+
+| Parte | De dónde viene | Por qué |
+|---|---|---|
+| Capa de cámara con **pool latest-frame en PSRAM** (productor único, `fcCameraAcquireLatest`) | rama remota | Separa captura de red mejor que la versión anterior, y pediste conservarla |
+| Métricas de firmware: FPS capturados y enviados, ms de captura y de envío, edad del frame, temperatura y límite térmico | rama remota | Se miden en el ESP32, que es donde se sabe la verdad |
+| Flujo de trabajo de **GitHub Actions** | rama remota | Compila el firmware en cada push |
+| Matemática del horizonte (`fc_horizon.h`) y sus 43 pruebas | esta rama | La remota usaba un suavizado fijo y no estaba verificada |
+| Interfaz con **canvas de verdad**, foto estabilizada a archivo y grabación | esta rama | La remota giraba el preview con CSS y no exportaba foto estabilizada |
+| Telemetría del horizonte, `/api/imucfg`, cabeceras `X-Ts`/`X-Seq`/`X-Horizon` | esta rama | Necesarias para el panel y para la foto estabilizada |
+
+Se han eliminado nueve constantes de `fc_config.h` que quedaron sin uso tras
+la fusión (`FC_IMU_SMOOTH`, `FC_HORIZON_SMOOTH`, `FC_IMU_CAMERA_*_AXIS`, …).
+Dejarlas habría sido una trampa: se podrían ajustar sin que hicieran nada.
 
 **No se ha probado sobre la placa física.** No tengo tu hardware delante.
 Todo lo que depende del silicio real (FPS, ruido del sensor, alcance del

@@ -3,7 +3,7 @@
 //
 //  Reparto de trabajo (nada bloquea a nada):
 //    núcleo 0 : Wi-Fi/LWIP, servidor web (:80) y servidor MJPEG (:81)
-//    núcleo 1 : tarea del BNO085, tarea de telemetría WebSocket, loop()
+//    núcleo 1 : productor de cámara, BNO085, telemetría WebSocket y loop()
 //
 //  El ESP32 no rota ni recomprime un solo píxel: manda JPEG tal cual sale
 //  del OV5640 y los ángulos del IMU. El giro del visor lo hace el navegador.
@@ -75,14 +75,17 @@ void loop() {
     g_lastBeat = now;
     FcCamStatus cs; fcCameraGetStatus(&cs);
     FcImuSample is; fcImuGet(&is);
-    Serial.printf("[LAT] up=%lus  cam=%s %ux%u  fps=%.1f  mjpeg=%lu  ws=%lu  "
-                  "imu=%s %.0fHz  roll=%+.1f  DRAM=%uKB  PSRAM=%uKB  drops=%lu\n",
+    Serial.printf("[LAT] up=%lus cam=%s %ux%u cap=%.1ffps red=%.1ffps/%ums "
+                  "mjpeg=%lu ws=%lu imu=%s %.0fHz horiz=%+.1f temp=%.1fC T%u "
+                  "DRAM=%uKB PSRAM=%uKB drop=%lu/%lu\n",
       (unsigned long)(now / 1000), cs.ready ? "OK" : "KO", cs.width, cs.height,
-      cs.fps, (unsigned long)cs.clients, (unsigned long)fcServerWsClients(),
-      fcImuStateText(is.state), is.hz, is.roll,
+      cs.fps, cs.sendFps, (unsigned)cs.targetFps,
+      (unsigned long)cs.clients, (unsigned long)fcServerWsClients(),
+      fcImuStateText(is.state), is.hz, is.horizonFilt, cs.temperatureC,
+      (unsigned)cs.thermalLevel,
       (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
       (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
-      (unsigned long)cs.dropped);
+      (unsigned long)cs.dropped, (unsigned long)cs.poolDropped);
   }
 
   // Si la cámara no arrancó (cable suelto al encender) se reintenta cada
