@@ -114,23 +114,44 @@
 #define FC_IMU_ADDR_B     0x4A        // algunos módulos vienen a 0x4A
 
 // Vector de orientación:
-//   1 = Game Rotation Vector  -> sin magnetómetro. Yaw relativo (deriva lenta),
-//                                roll/pitch muy estables. Recomendado para vídeo.
+//   1 = Game Rotation Vector  -> sin magnetómetro. Muy estable, sin tirones
+//                                por metales o motores. Recomendado.
 //   0 = Rotation Vector       -> usa magnetómetro. Yaw absoluto (norte), pero
-//                                se ensucia cerca de metales, motores e imanes.
+//                                se ensucia cerca de metales e imanes.
+// El Horizon Lock sólo necesita gravedad, así que el Game RV basta y sobra.
 #define FC_IMU_USE_GAME_RV   1
 
 #define FC_IMU_REPORT_MS     10       // 10 ms = 100 Hz solicitados al sensor
 #define FC_IMU_TASK_HZ       200      // frecuencia de sondeo de la tarea
-#define FC_IMU_DEADZONE_DEG  0.30f    // zona muerta 0.2..0.5 grados
-#define FC_IMU_INVERT_ROLL   0        // 1 si el módulo está montado del revés
-#define FC_IMU_INVERT_PITCH  0
-#define FC_IMU_INVERT_YAW    0
-// Suavizado exponencial: 1.0 = sin filtro (máxima respuesta, algo de ruido).
-// 0.35..0.55 quita ruido sin que se note retraso a 100 Hz.
-#define FC_IMU_SMOOTH        0.45f
 #define FC_IMU_TIMEOUT_MS    1500     // sin datos -> "IMU no disponible"
 #define FC_IMU_RETRY_MS      2000     // reintento de reconexión
+
+// --- Montaje del IMU (valores iniciales; se cambian desde la web) --------
+// Plano de la imagen en ejes del sensor. 0 = XY (eje óptico ~ Z, que es el
+// caso normal con el módulo pegado en paralelo a la placa de la cámara),
+// 1 = XZ (eje óptico ~ Y), 2 = YZ (eje óptico ~ X).
+#define FC_IMU_PLANE         0
+// Giro del módulo dentro de ese plano: 0, 90, 180 o 270 grados.
+#define FC_IMU_MOUNT_DEG     0
+// Sentido de la corrección. Ponlo a 1 si la imagen gira hacia el mismo lado
+// que la cámara en vez de al contrario.
+#define FC_IMU_INVERT_ROLL   0
+
+// --- Horizonte por gravedad ---------------------------------------------
+// Confianza = módulo de la gravedad proyectada en el plano de la imagen.
+// Vale 1 con la cámara apuntando al horizonte y 0 apuntando al cenit o al
+// nadir, donde el horizonte es matemáticamente indeterminado. Con histéresis
+// para no parpadear justo en el umbral. 0.17 ~ 10 grados de la vertical.
+#define FC_HORIZON_CONF_HI   0.17f    // hay que superarlo para volver a ser válido
+#define FC_HORIZON_CONF_LO   0.12f    // por debajo se declara "sin referencia"
+
+// Filtro de un polo dependiente de dt. tau pequeño = más rápido.
+#define FC_HORIZON_TAU_SLOW  0.110f   // quieto: suave, sin temblor
+#define FC_HORIZON_TAU_FAST  0.022f   // giro real: respuesta inmediata
+#define FC_HORIZON_TAU_REACQ 0.260f   // al recuperar referencia: deslizar, no saltar
+#define FC_HORIZON_FAST_DEG  6.0f     // error a partir del cual se usa tau rápido
+#define FC_HORIZON_DEADZONE  0.25f    // zona muerta en grados (0,2 a 0,5)
+#define FC_HORIZON_REACQ_MS  900      // duración del deslizamiento de recuperación
 
 // ---------------------------------------------------------------------
 // 4. Telemetría por WebSocket

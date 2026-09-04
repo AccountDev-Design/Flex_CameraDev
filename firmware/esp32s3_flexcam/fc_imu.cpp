@@ -2,22 +2,34 @@
 //  fc_imu.cpp
 // =====================================================================
 #include "fc_imu.h"
+#include "fc_horizon.h"
 #include <Wire.h>
 #include <SparkFun_BNO08x_Arduino_Library.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <math.h>
+#include <atomic>
 
-static BNO08x            s_bno;
-static portMUX_TYPE      s_lock = portMUX_INITIALIZER_UNLOCKED;
-static FcImuSample       s_pub  = {};
-static TaskHandle_t      s_task = nullptr;
+static BNO08x        s_bno;
+static portMUX_TYPE  s_lock = portMUX_INITIALIZER_UNLOCKED;
+static FcImuSample   s_pub  = {};
+static TaskHandle_t  s_task = nullptr;
 
-static uint8_t  s_addr       = FC_IMU_ADDR_A;
-static bool     s_useIntPin  = false;   // se decide solo, ver notas abajo
+static uint8_t  s_addr          = FC_IMU_ADDR_A;
+static bool     s_useIntPin     = false;
 static bool     s_bootConnected = false;
-static uint32_t s_reportCount = 0;
-static uint32_t s_hzWindow    = 0;
+static uint32_t s_reportCount   = 0;
+static uint32_t s_hzWindow      = 0;
+
+// Configuración de montaje. Volátil porque la escribe el servidor HTTP
+// desde otra tarea y la lee la tarea del IMU.
+static std::atomic<int32_t>  s_mountDeg{FC_IMU_MOUNT_DEG};
+static std::atomic<bool>     s_invert{FC_IMU_INVERT_ROLL != 0};
+static std::atomic<uint8_t>  s_plane{FC_IMU_PLANE};
+static std::atomic<uint32_t> s_epoch{1};
+
+// La matemática vive en fc_horizon.h, compartida con la prueba de PC.
+static inline float wrap180(float a) { return fchWrap180(a); }
 
 static const uint8_t WANTED_REPORT =
 #if FC_IMU_USE_GAME_RV
@@ -35,50 +47,21 @@ const char* fcImuStateText(FcImuState s) {
   }
 }
 
-// Diferencia angular más corta, en grados, siempre en -180..180.
-static inline float angDiff(float a, float b) {
-  float d = a - b;
-  while (d > 180.0f)  d -= 360.0f;
-  while (d < -180.0f) d += 360.0f;
-  return d;
-}
-
-static inline float wrap180(float a) {
-  while (a > 180.0f)  a -= 360.0f;
-  while (a < -180.0f) a += 360.0f;
-  return a;
-}
-
-// Cuaternión -> Tait-Bryan ZYX (roll X, pitch Y, yaw Z), en grados.
+// Cuaternión -> Tait-Bryan ZYX en grados. Sólo para mostrar en el panel:
+// el Horizon Lock NO usa este roll.
 static void quatToEuler(float qi, float qj, float qk, float qr,
                         float* roll, float* pitch, float* yaw) {
   float n = sqrtf(qi * qi + qj * qj + qk * qk + qr * qr);
   if (n < 1e-6f) { *roll = *pitch = *yaw = 0.0f; return; }
   float x = qi / n, y = qj / n, z = qk / n, w = qr / n;
-
-  float t0 = 2.0f * (w * x + y * z);
-  float t1 = 1.0f - 2.0f * (x * x + y * y);
-  *roll = atan2f(t0, t1) * RAD_TO_DEG;
-
+  *roll = atan2f(2.0f * (w * x + y * z), 1.0f - 2.0f * (x * x + y * y)) * RAD_TO_DEG;
   float t2 = 2.0f * (w * y - z * x);
-  if (t2 > 1.0f)  t2 = 1.0f;
-  if (t2 < -1.0f) t2 = -1.0f;
+  t2 = t2 > 1.0f ? 1.0f : (t2 < -1.0f ? -1.0f : t2);
   *pitch = asinf(t2) * RAD_TO_DEG;
-
-  float t3 = 2.0f * (w * z + x * y);
-  float t4 = 1.0f - 2.0f * (y * y + z * z);
-  *yaw = atan2f(t3, t4) * RAD_TO_DEG;
+  *yaw = atan2f(2.0f * (w * z + x * y), 1.0f - 2.0f * (y * y + z * z)) * RAD_TO_DEG;
 }
 
-// Filtro: media exponencial sobre la diferencia angular más corta (para que
-// no pegue saltos al cruzar +-180) + zona muerta para que no tiemble parado.
-static inline float filterAngle(float prev, float raw, bool first) {
-  if (first) return raw;
-  float d = angDiff(raw, prev);
-  if (fabsf(d) < FC_IMU_DEADZONE_DEG) return prev;
-  return wrap180(prev + d * FC_IMU_SMOOTH);
-}
-
+// ---------------------------------------------------------------------
 static bool enableReports() {
 #if FC_IMU_USE_GAME_RV
   return s_bno.enableGameRotationVector(FC_IMU_REPORT_MS);
@@ -87,19 +70,18 @@ static bool enableReports() {
 #endif
 }
 
-// Nota sobre el pin INT (GPIO1):
-// a la librería se le pasa siempre -1 como pin de interrupción a propósito.
-// Su hal_wait_for_int() hace un bucle bloqueante de hasta 500 ms y, si expira,
-// resetea el sensor por hardware; con el IMU desconectado eso convertiría cada
-// lectura en medio segundo perdido. Aquí el INT se lee a mano, sin bloquear:
-// sólo sirve de aviso de "hay dato listo".
+// A la librería se le pasa siempre INT = -1 a propósito: su
+// hal_wait_for_int() bloquea hasta 500 ms y además resetea el sensor por
+// hardware al expirar. Todas esas llamadas están dentro de
+// "if (_int_pin != -1)", así que con -1 nunca se ejecutan. GPIO1 se lee
+// aquí a mano, sin bloquear, sólo como aviso de "hay dato listo".
 static bool tryConnect() {
   const uint8_t addrs[2] = { FC_IMU_ADDR_A, FC_IMU_ADDR_B };
   for (int i = 0; i < 2; i++) {
     if (s_bno.begin(addrs[i], FC_IMU_WIRE, -1, FC_IMU_RST)) {
       s_addr = addrs[i];
       if (!enableReports()) {
-        Serial.println(F("[IMU] El sensor respondió pero rechazó el informe."));
+        Serial.println(F("[IMU] El sensor respondio pero rechazo el informe."));
         continue;
       }
       Serial.printf("[IMU] BNO085 en 0x%02X, %s a %d Hz\n", s_addr,
@@ -122,28 +104,53 @@ void fcImuGet(FcImuSample* out) {
   portENTER_CRITICAL(&s_lock);
   *out = s_pub;
   portEXIT_CRITICAL(&s_lock);
-  // Envejecer el estado fuera de la sección crítica.
   if (out->state == FC_IMU_OK &&
-      (millis() - out->lastUpdateMs) > FC_IMU_TIMEOUT_MS) {
+      (millis() - out->tsMs) > FC_IMU_TIMEOUT_MS) {
     out->state = FC_IMU_STALE;
     out->hz = 0.0f;
   }
 }
 
+void fcImuSetMount(int deg) {
+  int d = ((deg % 360) + 360) % 360;
+  d = (d / 90) * 90;                       // sólo 0/90/180/270
+  if (d != s_mountDeg.load()) { s_mountDeg.store(d); s_epoch.fetch_add(1); }
+}
+void fcImuSetInvert(bool inv) {
+  if (inv != s_invert.load()) { s_invert.store(inv); s_epoch.fetch_add(1); }
+}
+void fcImuSetPlane(uint8_t plane) {
+  if (plane > FC_PLANE_YZ) plane = FC_PLANE_XY;
+  if (plane != s_plane.load()) { s_plane.store(plane); s_epoch.fetch_add(1); }
+}
+
+// ---------------------------------------------------------------------
+// Tarea
+// ---------------------------------------------------------------------
 static void imuTask(void* arg) {
   (void)arg;
   FcImuSample local = {};
   local.state = FC_IMU_INIT;
+  local.mountDeg = (int16_t)s_mountDeg.load();
+  local.invert   = s_invert.load();
+  local.plane    = s_plane.load();
+  local.epoch    = s_epoch.load();
   publish(local);
 
-  bool     connected  = s_bootConnected;   // ya conectado desde fcImuBegin()
-  bool     firstValue = true;
+  FcHorizonState hz_st;
+  fchReset(&hz_st);
+
+  bool     connected  = s_bootConnected;
+  bool     haveHorizon = false;
+  bool     wasValid    = false;
   uint32_t lastTry    = 0;
   uint32_t lastData   = millis();
-  uint32_t intSeen    = 0;      // cuántas veces el INT ha marcado dato listo
+  uint32_t intSeen    = 0;
   uint32_t started    = millis();
-  if (connected) { local.state = FC_IMU_OK; s_useIntPin = (FC_IMU_INT >= 0); }
+  uint32_t lastEpoch  = s_epoch.load();
   const TickType_t period = pdMS_TO_TICKS(1000 / FC_IMU_TASK_HZ);
+
+  if (connected) { local.state = FC_IMU_OK; s_useIntPin = (FC_IMU_INT >= 0); }
 
   for (;;) {
     uint32_t now = millis();
@@ -155,23 +162,19 @@ static void imuTask(void* arg) {
         publish(local);
         connected = tryConnect();
         if (connected) {
-          firstValue = true;
-          lastData   = millis();
-          started    = millis();
-          intSeen    = 0;
+          fchReset(&hz_st); haveHorizon = false; wasValid = false;
+          lastData = millis(); started = millis(); intSeen = 0;
           s_useIntPin = (FC_IMU_INT >= 0);
         } else {
           local.state = FC_IMU_ABSENT;
           local.hz = 0.0f;
-          publish(local);
+          publish(local);            // se congela el último horizonte válido
         }
       }
       vTaskDelay(pdMS_TO_TICKS(50));
       continue;
     }
 
-    // El BNO085 puede reiniciarse solo (pico de tensión, watchdog interno).
-    // Cuando pasa hay que volver a pedir los informes o deja de hablar.
     if (s_bno.wasReset()) {
       local.resets++;
       Serial.println(F("[IMU] El BNO085 se ha reiniciado, reactivando informes."));
@@ -183,14 +186,26 @@ static void imuTask(void* arg) {
       }
     }
 
-    // El INT en LOW significa "tengo dato". Si tras 1,5 s nunca ha bajado
-    // pero sí llegan datos, es que el cable INT no está: se deja de mirar.
+    // Un cambio de montaje/inversión/plano cambia el ángulo de golpe. Se
+    // vuelve a sembrar el continuo para no acumular un salto falso; la web
+    // ve subir 'epoch' y retoma su referencia.
+    uint32_t epochNow = s_epoch.load();
+    if (epochNow != lastEpoch) {
+      lastEpoch = epochNow;
+      fchReset(&hz_st);
+      haveHorizon = false;
+      local.epoch = lastEpoch;
+    }
+    local.mountDeg = (int16_t)s_mountDeg.load();
+    local.invert   = s_invert.load();
+    local.plane    = s_plane.load();
+
     bool poll = true;
     if (s_useIntPin) {
       if (digitalRead(FC_IMU_INT) == LOW) { intSeen++; }
       else if (now - started > 1500 && intSeen == 0) {
         s_useIntPin = false;
-        Serial.println(F("[IMU] Sin señal en el pin INT: se pasa a sondeo por tiempo."));
+        Serial.println(F("[IMU] Sin senal en el pin INT: se pasa a sondeo por tiempo."));
       } else {
         poll = false;
       }
@@ -208,43 +223,53 @@ static void imuTask(void* arg) {
         qk = s_bno.getQuatK();  qr = s_bno.getQuatReal();
         uint8_t acc = s_bno.getQuatAccuracy();
 #endif
-        float r, p, y;
-        quatToEuler(qi, qj, qk, qr, &r, &p, &y);
-#if FC_IMU_INVERT_ROLL
-        r = -r;
-#endif
-#if FC_IMU_INVERT_PITCH
-        p = -p;
-#endif
-#if FC_IMU_INVERT_YAW
-        y = -y;
-#endif
-        local.roll  = filterAngle(local.roll,  r, firstValue);
-        local.pitch = filterAngle(local.pitch, p, firstValue);
-        local.yaw   = filterAngle(local.yaw,   y, firstValue);
+        uint32_t tNow = millis();
+
+        float gx, gy, gz;
+        fchGravityFromQuat(qi, qj, qk, qr, &gx, &gy, &gz);
+
+        float rawPlane, conf;
+        fchHorizonFromGravity(gx, gy, gz, local.plane, &rawPlane, &conf);
+        float raw = fchApplyMount(rawPlane, local.mountDeg, local.invert);
+
+        // Histéresis para no parpadear justo en el umbral.
+        bool valid = wasValid ? (conf > FC_HORIZON_CONF_LO)
+                              : (conf > FC_HORIZON_CONF_HI);
+
+        fchUpdate(&hz_st, raw, valid, tNow);
+        if (valid) local.horizonRaw = raw;
+        local.horizonCont = hz_st.cont;
+        local.horizonFilt = hz_st.filt;
+        haveHorizon = hz_st.have;
+
+        wasValid = valid;
+        local.horizonValid = valid && haveHorizon;
+        local.confidence   = conf;
+        local.gx = gx; local.gy = gy; local.gz = gz;
         local.qi = qi; local.qj = qj; local.qk = qk; local.qr = qr;
+        quatToEuler(qi, qj, qk, qr, &local.roll, &local.pitch, &local.yaw);
         local.accuracy = acc;
-        local.state = FC_IMU_OK;
-        local.lastUpdateMs = millis();
-        firstValue = false;
-        lastData = local.lastUpdateMs;
+        local.state    = FC_IMU_OK;
+        local.tsMs     = tNow;
+        local.seq++;
+        lastData = tNow;
 
         s_reportCount++;
-        if (local.lastUpdateMs - s_hzWindow >= 1000) {
-          uint32_t dt = local.lastUpdateMs - s_hzWindow;
+        if (tNow - s_hzWindow >= 1000) {
+          uint32_t dtw = tNow - s_hzWindow;
           local.hz = (s_hzWindow == 0) ? 0.0f
-                                       : (float)s_reportCount * 1000.0f / (float)dt;
+                                       : (float)s_reportCount * 1000.0f / (float)dtw;
           s_reportCount = 0;
-          s_hzWindow = local.lastUpdateMs;
+          s_hzWindow = tNow;
         }
         publish(local);
       }
     }
 
-    // Sin datos durante demasiado tiempo: marcar y reintentar desde cero.
     if (millis() - lastData > FC_IMU_TIMEOUT_MS) {
       local.state = FC_IMU_STALE;
       local.hz = 0.0f;
+      local.horizonValid = false;      // congelado, no falso
       publish(local);
       if (!s_bno.isConnected()) {
         Serial.println(F("[IMU] BNO085 desaparecido del bus, reintentando."));
@@ -264,26 +289,27 @@ static void imuTask(void* arg) {
 
 bool fcImuBegin() {
   FC_IMU_WIRE.begin(FC_IMU_SDA, FC_IMU_SCL, FC_IMU_I2C_HZ);
-  FC_IMU_WIRE.setTimeOut(50);          // ms; un bus colgado no bloquea la tarea
+  FC_IMU_WIRE.setTimeOut(50);
   if (FC_IMU_INT >= 0) pinMode(FC_IMU_INT, INPUT_PULLUP);
 
   bool present = tryConnect();
   s_bootConnected = present;
   if (!present) {
-    Serial.println(F("[IMU] No se detecta el BNO085. La cámara arranca igual; "
-                     "la web mostrará 'IMU no disponible' y seguirá reintentando."));
+    Serial.println(F("[IMU] No se detecta el BNO085. La camara arranca igual; "
+                     "la web mostrara 'IMU no disponible' y seguira reintentando."));
   }
 
   FcImuSample s = {};
   s.state = present ? FC_IMU_OK : FC_IMU_ABSENT;
-  s.lastUpdateMs = millis();
+  s.tsMs  = millis();
+  s.mountDeg = (int16_t)s_mountDeg.load();
+  s.invert   = s_invert.load();
+  s.plane    = s_plane.load();
+  s.epoch    = s_epoch.load();
   publish(s);
 
-  // Núcleo 1: el Wi-Fi y los servidores HTTP viven en el 0. Así una lectura
-  // I2C lenta no le quita tiempo al streaming.
-  BaseType_t ok = xTaskCreatePinnedToCore(imuTask, "fc_imu", 4096, nullptr,
-                                          3, &s_task, 1);
-  if (ok != pdPASS) {
+  // Núcleo 1: el Wi-Fi y los servidores HTTP viven en el 0.
+  if (xTaskCreatePinnedToCore(imuTask, "fc_imu", 4608, nullptr, 3, &s_task, 1) != pdPASS) {
     Serial.println(F("[IMU] No se pudo crear la tarea del IMU."));
     return false;
   }

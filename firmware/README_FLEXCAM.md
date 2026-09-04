@@ -13,29 +13,43 @@ recomprime un fotograma.
 
 ## 1. Qué se ha verificado (y qué no)
 
-Compilado de verdad con `arduino-cli 1.2.0` + core **esp32 3.3.11**:
+Compilado de verdad con `arduino-cli 1.2.0` + core **esp32 3.3.11** +
+**SparkFun BNO08x 1.0.6**, con la misma configuración que usarás en el IDE:
 
 ```
-Sketch uses 1034123 bytes (32%) of program storage space. Maximum is 3145728 bytes.
-Global variables use 60916 bytes (18%) of dynamic memory, leaving 266764 bytes
+Sketch uses 1063435 bytes (33%) of program storage space. Maximum is 3145728 bytes.
+Global variables use 60988 bytes (18%) of dynamic memory, leaving 266692 bytes
 for local variables. Maximum is 327680 bytes.
 ```
 
 **Cero errores y cero warnings** con `--warnings all`.
 
-La interfaz web se ha probado en Chromium con el backend simulado: 26 pruebas
-automáticas, todas verdes (rotación 0/90/180/270/360, que 360° sea idéntico a
-0°, persistencia en `localStorage`, sentido y límite de la compensación,
-suma de rotación manual + horizonte, que la rotación manual no toque el IMU,
-cambios de modo, IMU caído, y ausencia de desbordamiento horizontal en móvil
-vertical, móvil horizontal y tablet).
+**43 pruebas de la matemática del horizonte** (`firmware/tools/run_tests.sh`),
+todas verdes. No son una reimplementación: compilan el mismo `fc_horizon.h`
+que se enlaza en la placa. Incluyen los ángulos 0°, 45°, 90°, 179°, 180°,
+181°, 270°, 360° y 720°, el recorrido continuo 0 → +720 → −720 sin saltos, el
+signo de la compensación, el límite físico del cenit/nadir y el montaje.
 
-**No se ha probado sobre la placa física.** No tengo tu hardware delante. Todo
-lo que depende del silicio real (FPS, ruido del sensor, alcance del Wi-Fi)
-está marcado abajo como estimación, y el propio firmware mide y muestra los
-valores reales en la web.
+**56 pruebas de la interfaz en Chromium**, todas verdes. Lo importante de
+estas: no comprueban textos, **miden los píxeles del canvas**. Se sirve un
+MJPEG simulado cuyos fotogramas llevan una barra blanca dibujada con la
+inclinación que tendría en el sensor si la cámara estuviera girada, y después
+se ajusta por mínimos cuadrados la inclinación de esa barra en el resultado:
 
----
+| Giro físico | Inclinación residual medida en el canvas |
+|---|---|
+| 0°, 12°, 45°, 90°, 179°, 180°, 181°, 270°, 360°, 720°, −30° | **0,00°** en todos |
+| Con Horizon Lock apagado (control) | 29,99° — es decir, no corrige, como debe |
+
+También se verifica midiendo píxeles que **el JPEG estabilizado descargado**
+está realmente girado (0,00° de inclinación dentro del archivo) mientras la
+foto original se conserva intacta (29,99°), y que la grabación produce un
+archivo real (MP4 de 34 KB en la prueba) que se descarga solo.
+
+**No se ha probado sobre la placa física.** No tengo tu hardware delante.
+Todo lo que depende del silicio real (FPS, ruido del sensor, alcance del
+Wi-Fi, temperatura) está marcado abajo como estimación, y el firmware mide y
+muestra los valores reales en la web.
 
 ## 2. Conflictos reales encontrados durante la revisión
 
@@ -80,7 +94,16 @@ pide **QSXGA 2560×1920 (4,92 MP)** directamente: así lo que anuncia la web es
 lo que sale del sensor. El chip OV5640 tiene 2592×1944 de matriz; el recorte
 lo pone el driver, no el sensor.
 
-### 2.3 El pin INT del BNO085 no se le pasa a la librería
+### 2.3 No se usan `esp_camera_reconfigure`, `af_is_supported` ni `af_trigger`
+
+Esas tres funciones **sí existen** en el core esp32 3.3.11 (están en
+`esp_camera.h` y `sensor.h` del propio core, y una versión anterior de este
+firmware compilaba con ellas). Aun así se han quitado: `esp_camera_reconfigure`
+no es más que `esp_camera_deinit()` seguido de `esp_camera_init()`, que es lo
+que hace ahora el firmware, y así compila igual en cualquier versión del core
+sin depender de añadidos recientes. El autofoco se ha retirado por lo mismo.
+
+### 2.4 El pin INT del BNO085 no se le pasa a la librería
 
 `SparkFun_BNO08x` tiene esto en su HAL de I2C:
 
@@ -99,7 +122,7 @@ sólo como aviso de "hay dato listo". Si a los 1,5 s el INT nunca ha bajado
 pero sí llegan datos, el firmware deduce que el cable no está y pasa a sondeo
 por tiempo, sin avisos ni fallos.
 
-### 2.4 No se incluye `partitions.csv` a propósito
+### 2.5 No se incluye `partitions.csv` a propósito
 
 `platform.txt` del core resuelve las particiones en este orden, y **gana el
 último**:
@@ -244,65 +267,249 @@ alto = más comprimido = menos bytes) y quédate con un solo cliente.
 
 ---
 
-## 6. Horizon Lock: cómo funciona y por qué el límite no siempre es ±15°
+## 6. Horizon Lock: cómo funciona de verdad
 
-Todo ocurre en el navegador, con `transform: rotate() scale()` sobre el
-elemento del stream. Nada de esto toca al ESP32.
+### 6.1 El ángulo NO sale del roll de Euler
 
-* Al activarlo se guarda el roll actual como referencia (`refRoll`).
-* Compensación = **negativo** del roll relativo, normalizado a −180…+180 para
-  que no pegue el salto de +180° a −180°.
-* Rotación final = **rotación manual + compensación**. Con rotación manual 90°
-  y horizonte −12°, el visor usa 78°. (Probado automáticamente.)
-* Sin transiciones CSS: el giro se aplica en el `requestAnimationFrame`, con
-  el último dato recibido. La respuesta es inmediata.
-
-**El límite útil.** La escala mínima para que una imagen girada θ grados siga
-cubriendo un visor de W×H es:
+El roll de Euler se vuelve inestable cuando la cámara se inclina hacia arriba
+o hacia abajo, y cerca de la vertical se dispara. Por eso el ángulo se calcula
+**proyectando la gravedad sobre los ejes reales de la cámara**:
 
 ```
-escala(θ) = max( (W·|cos θ| + H·|sin θ|) / w , (W·|sin θ| + H·|cos θ|) / h )
+gravedad en ejes del sensor, a partir del cuaternión del BNO085:
+    gx =  2(wy − xz)
+    gy = −2(yz + wx)
+    gz =  2(x² + y²) − 1
+
+horizonte = atan2(−g·derecha, g·abajo)
+confianza = |(g·derecha, g·abajo)|          -> 0..1
 ```
 
-Con una imagen 4:3 dentro de un visor 4:3, tapar las esquinas a 15° exige
-**1,31×** de zoom. Como pediste mantener el recorte entre **1,08× y 1,20×**,
-el firmware hace lo que dijiste para el caso de pasarse: en vez de enseñar
-esquinas negras, **recorta el ángulo** al máximo que ese zoom sí puede tapar,
-y saca el aviso **"Límite de Horizon Lock"**. Ese máximo se recalcula solo
-según la forma real del visor (por eso en móvil vertical sale ±15,0° y en
-tablet horizontal ±11,9°) y se muestra en el panel como **"Límite útil"**.
+El firmware usa el **Game Rotation Vector**, no el roll. Emite el cuaternión y
+el vector gravedad completos, y los dos se ven en el panel.
 
-¿Quieres los ±15° completos siempre? Sube `ZOOM_MAX` a `1.35` en el bloque de
-constantes al principio del `<script>` de `fc_web_ui.h`. A cambio recortas más
-encuadre. Las tres constantes están juntas y comentadas:
+**Signo.** El valor que sale es la inclinación de la *vertical del mundo tal y
+como aparece dentro de la imagen*, no el giro de la cámara. Si la cámara rueda
++30° en sentido horario, el contenido del fotograma aparece inclinado −30°, así
+que el firmware emite −30. Con eso la fórmula queda exactamente como pediste:
 
-```js
-const HORIZON_LIMIT_DEG = 15.0;
-const ZOOM_MIN          = 1.08;
-const ZOOM_MAX          = 1.20;
+```
+compensación   = −(horizonte_actual − horizonte_referencia)
+rotación_final = rotación_manual + compensación
 ```
 
----
+y el visor gira +30°, devolviendo el contenido a la vertical. Verificado
+midiendo píxeles, no razonando sobre el signo.
+
+### 6.2 Continuidad: 180°, 360°, 720° y más
+
+El ángulo crudo vive en −180…+180. El firmware mantiene aparte un **ángulo
+continuo**: en cada muestra acumula la diferencia angular más corta, así el
+valor pasa por 180, 360, 720 y sigue subiendo sin ninguna discontinuidad. La
+web usa ese continuo tal cual, sin volver a envolverlo, de modo que la
+compensación tampoco salta nunca. En la prueba, dos vueltas hacia delante y
+cuatro hacia atrás dan un salto máximo de 1,0001° con un paso de muestreo de
+1,0000°: es decir, ninguno.
+
+### 6.3 Filtro: suave parado, rápido en giro
+
+Un solo filtro, en el firmware. La web **no vuelve a filtrar**, para no sumar
+dos retrasos. Es un polo simple dependiente de `dt` con constante de tiempo
+adaptativa:
+
+* parado → τ = 0,110 s, no tiembla;
+* giro real → τ = 0,022 s, sigue el movimiento sin arrastre;
+* zona muerta de 0,25°, así un temblor pequeño no mueve la imagen (medido:
+  0,000000000° de desvío ante un temblor de 0,15°);
+* un giro real de 45° se sigue hasta el 90% en **60 ms**.
+
+Cada muestra lleva marca de tiempo y número de secuencia, y `dt` está acotado
+para que un hueco en el reloj no se traduzca nunca en un salto de imagen.
+
+### 6.4 El límite físico: cenit y nadir
+
+Cuando la cámara apunta recto arriba o recto abajo, toda la gravedad se va por
+el eje óptico y **el horizonte queda matemáticamente indeterminado**. No hay
+truco posible: no existe información para saber qué es «arriba» en la imagen.
+
+Confianza medida frente a la inclinación de la óptica:
+
+| Óptica levantada | Confianza |
+|---|---|
+| 0° (al horizonte) | 1,000 |
+| 45° | 0,707 |
+| 80° | 0,174 |
+| 89° | 0,018 → sin referencia |
+| 90° (al cenit) | 0,000 → sin referencia |
+
+Por debajo del umbral (0,17 para entrar, 0,12 para salir, con histéresis para
+no parpadear) el firmware:
+
+* **congela el último ángulo válido**, exacto: en la prueba, un segundo
+  apuntando al cenit con ruido en el ángulo da 0,000000000° de deriva;
+* la web muestra **«Horizonte sin referencia»** sobre el visor y en el panel;
+* al recuperar la referencia **desliza hasta el ángulo verdadero en vez de
+  saltar** (primer paso medido: 0,058°), usando el representante del ángulo
+  continuo más cercano al valor congelado.
+
+Nunca se inventa un valor ni se produce un giro errático.
+
+### 6.5 Dónde ocurre el giro: en un canvas, no en CSS
+
+El ESP32 sigue mandando su MJPEG sin tocar un píxel. En el navegador:
+
+1. El stream se lee con `fetch` y se trocea el multipart a mano. Cada parte
+   trae `X-Ts` y `X-Seq`, que el ESP32 añade por fotograma: gracias a eso el
+   panel puede mostrar **edad del frame y latencia reales**, no estimadas.
+   Cada JPEG se decodifica con `createImageBitmap`.
+2. Si ya hay una decodificación en curso, el fotograma pendiente anterior **se
+   descarta**. Nunca se forma una cola: siempre gana el más reciente.
+3. Cada `requestAnimationFrame` se dibuja en un `<canvas>` con
+   `rotate(rotación_final)` y `scale(zoom)`. Ese canvas es el visor.
+4. Si el navegador no trae streams o `createImageBitmap`, se cae solo a un
+   `<img>` con MJPEG. En ese modo la edad del frame es aproximada y se nota.
+
+Como el giro está en los píxeles del canvas y no en una transformación CSS,
+**lo que se exporta a foto y lo que graba `MediaRecorder` es exactamente lo
+que se ve**.
+
+### 6.6 Perfiles de encuadre
+
+La escala mínima para que una imagen w×h girada θ grados cubra un lienzo W×H es:
+
+```
+escala(θ) = max( (W·|cos θ| + H·|sin θ|)/w , (W·|sin θ| + H·|cos θ|)/h )
+```
+
+Y el peor caso sobre **todos** los ángulos tiene solución cerrada:
+
+```
+escala_360 = √(W² + H²) / min(w, h)
+```
+
+Para 4:3 dentro de 4:3 son exactamente **5/3 = 1,667×**. No es un número
+elegido a ojo; el firmware lo calcula con esa fórmula (verificado: 1,6667).
+
+| Perfil | Qué hace |
+|---|---|
+| **Dinámico** | `escala(θ)` exacta en cada fotograma. Nunca hay bordes negros, el zoom respira con el ángulo. |
+| **Estable 360°** | `escala_360` fija. El encuadre no cambia nunca, aunque des vueltas completas. Es el que conviene para grabar. |
+| **Amplio** | Tope de 1,25×. Recorta mucho menos, pero **avisa en pantalla** en cuanto el ángulo pide más de lo que ese zoom puede tapar. |
+
+Con rotación manual de 90° o 270° el lienzo **se pone de canto** (800×600 pasa
+a 600×800), así la imagen encaja sin tener que recortar un tercio sólo por
+estar de lado.
 
 ## 7. Rotación manual de la vista
 
-Selector **0° / 90° / 180° / 270° / 360°**, independiente del IMU.
+Selector **0° / 90° / 180° / 270° / 360°**, completamente independiente del IMU.
 
-* Sólo gira el elemento visual en el navegador. Ningún fotograma se rota en
-  el ESP32.
+* Sólo gira el lienzo en el navegador. Ningún fotograma se rota en el ESP32.
 * Funciona con Horizon Lock apagado y se suma correctamente cuando está
-  encendido.
+  encendido: `rotación_final = manual + compensación`. Verificado: manual 90° y
+  compensación −12° dan **78,00°**.
 * **360° se comporta exactamente igual que 0°** (`manualRot % 360`), pero se
-  mantiene como opción visible en el selector, como pediste.
-* En 90° y 270° el contenedor se reescala con la fórmula de cobertura de
-  arriba: ni barras negras ni imagen deformada.
-* La selección se guarda en `localStorage` y sobrevive a recargar.
-* No reinicia la cámara ni el ESP32: es puro CSS.
-* **No altera roll, pitch, yaw ni la calibración del IMU.**
+  mantiene visible en el selector. Verificado: mismo lienzo 800×600 y misma
+  inclinación resultante.
+* En 90° y 270° el lienzo se pone de canto (600×800): ni barras negras ni
+  imagen deformada.
+* No cambia roll, pitch, yaw ni la calibración del IMU. Verificado.
+* Se guarda en `localStorage` y sobrevive a recargar.
+* No reinicia la cámara ni el ESP32.
+* **Se bloquea durante la grabación**: cambiar el tamaño del lienzo con
+  `MediaRecorder` en marcha corrompe el archivo. La web lo dice al intentarlo.
 
 ---
 
-## 8. Qué pasa cuando algo falla
+## 8. Foto
+
+El obturador (pestaña **FOTO**) hace dos cosas:
+
+1. Pide `/api/photo` al ESP32 y guarda el **JPEG original tal cual**.
+2. Si Horizon Lock está activo, dibuja ese JPEG en un canvas aparte a
+   resolución completa con **la misma rotación, zoom y recorte** del visor, y
+   genera un **JPEG nuevo realmente estabilizado** (calidad 0,92).
+
+Tocando la miniatura se descargan los dos archivos: `..._estabilizada.jpg` y
+`..._original.jpg`. Con Horizon Lock apagado se descarga sólo el original.
+
+El ángulo que se aplica **no se adivina**: la respuesta de `/api/photo` trae
+las cabeceras `X-Horizon`, `X-Hvalid` y `X-Hepoch` con el ángulo del instante
+exacto del disparo, medido en el ESP32. Entre que se pide la foto y llega el
+JPEG pasan cientos de milisegundos (a 2560×1920 hay que reconfigurar el
+sensor) y la cámara puede haberse movido en ese rato.
+
+El panel informa siempre de lo real, nunca de lo nominal:
+
+```
+Original 800×600 (18 KB) · Estabilizada 800×600 (15 KB), recorte 1.533×, giro 30.0°
+```
+
+Las dimensiones salen de decodificar el archivo recibido, así que si el driver
+entrega 2560×1920 es eso lo que se muestra, nunca 2592×1944.
+
+---
+
+## 9. Vídeo
+
+Pestaña **VÍDEO**. El obturador pasa a rojo y se convierte en botón de
+grabar/detener.
+
+* Se graba **el canvas ya corregido** con `canvas.captureStream(fps)`. Con
+  Horizon Lock activo **nunca** se graba el MJPEG bruto.
+* `MediaRecorder` prueba **MP4 (avc1) primero** y cae a WebM (VP9 → VP8) si el
+  navegador no lo soporta. El aviso en pantalla dice cuál se está usando.
+* FPS elegible: 15 / 24 / 30. El bitrate se calcula a partir de los píxeles y
+  los fps, acotado entre 0,8 y 8 Mb/s, para no ahogar el móvil.
+* Durante la grabación se ve un indicador con **tiempo y tamaño acumulado**.
+* Al detener, el archivo se **descarga solo** a la carpeta de Descargas.
+* Al detener se paran los tracks, se limpia el temporizador y se revocan los
+  object URLs anteriores. Verificado en las pruebas: sin temporizadores vivos,
+  `MediaRecorder` y stream a `null`.
+
+Los cambios de modo y de resolución quedan bloqueados mientras se graba, por
+la misma razón que la rotación manual.
+
+---
+
+## 10. Panel de detalle
+
+Se abre con la flecha junto al botón de Horizon Lock, y **no tapa el visor**:
+en móvil ocupa la parte de abajo con scroll propio; en tablet horizontal pasa
+a una columna lateral. Muestra en tiempo real:
+
+**Estado** — Activo / Apagado / Sin referencia · compensación congelada / IMU
+no disponible · horizonte bruto · horizonte continuo · ángulo de referencia ·
+compensación aplicada · dirección (horaria ↻ / antihoraria ↺ / centrado) ·
+rotación total · zoom y recorte aplicados.
+
+**IMU** — roll · pitch · yaw · frecuencia real en Hz · confianza de gravedad
+con barra · calibración · **cuaternión completo** (i, j, k, real) · **vector
+gravedad** (x, y, z).
+
+**Rendimiento** — FPS de captura (fotogramas decodificados en el navegador) ·
+FPS enviados (los que cuenta el ESP32) · FPS de render · edad del último frame
+· latencia relativa · frames perdidos · temperatura del chip · reinicios del
+IMU · memoria libre interna y PSRAM.
+
+> La latencia es **relativa**: se descuenta el mejor trayecto observado, lo que
+> absorbe el desfase entre el reloj del ESP32 y el del móvil. Sirve para ver
+> jitter y degradación, no como valor absoluto. Prefiero decirlo a presentar
+> un número absoluto que no puedo medir con dos relojes sin sincronizar.
+
+**Controles del panel** — activar/desactivar Lock · recentrar horizonte ·
+cuadrícula · rotación visual manual · perfil de encuadre · montaje del IMU
+(0/90/180/270) · eje óptico del IMU (Z/Y/X) · sentido normal/invertido ·
+calidad de vídeo · voltear sensor.
+
+El montaje, el sentido y el plano se cambian **en caliente**, sin reprogramar:
+van a `/api/imucfg` y el firmware sube un contador de época. La web ve ese
+cambio y **retoma la referencia sola**, para que cambiar el montaje no provoque
+un salto en la imagen.
+
+Horizon Lock **nunca se activa solo**. Sólo se enciende cuando lo pulsas.
+
+## 11. Qué pasa cuando algo falla
 
 | Situación | Comportamiento |
 |---|---|
@@ -315,6 +522,12 @@ Selector **0° / 90° / 180° / 270° / 360°**, independiente del IMU.
 | Cambio de modo mientras otro reconfigura | El segundo espera hasta 4 s y, si no, responde "cámara ocupada" en vez de romper nada. |
 | Fallo al reconfigurar | Se intenta volver al modo anterior; si tampoco, se marca la cámara como caída y se dice en la web. |
 | Sin PSRAM | Aviso explícito por serie y `fb_count` baja a 1 en vez de fallar sin explicación. |
+| Cámara apuntando al cenit o al nadir | Congela la última compensación válida, avisa «Horizonte sin referencia» y al volver desliza hasta el ángulo verdadero. Nunca salta ni inventa. |
+| El navegador no puede trocear el MJPEG | Cae solo a `<img>` con MJPEG. Sigue estabilizando; la edad de frame pasa a ser aproximada. |
+| El navegador no soporta MP4 | Graba en WebM y lo dice en pantalla. |
+| El navegador no soporta `MediaRecorder` | Lo dice y deja la foto funcionando. |
+| Se cambia el montaje del IMU con el Lock activo | La web detecta el cambio de época y retoma la referencia sola, sin salto. |
+| Pestaña en segundo plano | Al volver se relanza el stream si murió. `Stream.start()` siempre cierra el anterior: nunca hay dos. |
 
 Ningún `delay()` en las rutas de vídeo, IMU o telemetría; sólo uno de 50 ms en
 `loop()`, que no hace trabajo real. Ninguna operación cara dentro de un
@@ -322,7 +535,7 @@ callback: la telemetría se arma en su propia tarea.
 
 ---
 
-## 9. Reparto de tareas
+## 12. Reparto de tareas
 
 | Núcleo | Qué corre |
 |---|---|
@@ -335,23 +548,25 @@ Presupuesto de sockets: `CONFIG_LWIP_MAX_SOCKETS=16`. El servidor web usa
 
 ---
 
-## 10. Ajustes rápidos (`fc_config.h`)
+## 13. Ajustes rápidos (`fc_config.h`)
 
 | Constante | Para qué |
 |---|---|
 | `FC_AP_SSID` / `FC_AP_PASSWORD` / `FC_AP_CHANNEL` | Red del ESP32 |
 | `FC_CAM_PROFILE` | Perfil de pines de cámara |
 | `FC_XCLK_HZ` | Reloj del sensor (20 MHz por defecto; 24 da algo más de FPS pero saca artefactos en varias placas) |
-| `FC_IMU_INVERT_ROLL` | **Ponlo a 1 si el módulo está montado del revés** |
-| `FC_IMU_DEADZONE_DEG` | Zona muerta, 0,30° por defecto (rango pedido 0,2–0,5) |
-| `FC_IMU_SMOOTH` | Filtro: 1.0 = sin filtro; 0,45 por defecto |
+| `FC_IMU_INVERT_ROLL` | Sentido inicial (también se cambia desde la web) |
+| `FC_IMU_MOUNT_DEG` / `FC_IMU_PLANE` | Montaje inicial (también desde la web) |
+| `FC_HORIZON_DEADZONE` | Zona muerta, 0,25° por defecto (rango pedido 0,2–0,5) |
+| `FC_HORIZON_TAU_SLOW` / `FC_HORIZON_TAU_FAST` | Filtro adaptativo: quieto / en giro |
+| `FC_HORIZON_CONF_HI` / `FC_HORIZON_CONF_LO` | Umbrales de «sin referencia», con histéresis |
 | `FC_IMU_USE_GAME_RV` | 1 = Game Rotation Vector (sin brújula, más estable). 0 = Rotation Vector (yaw absoluto pero sensible a metales) |
 | `FC_IMU_REPORT_MS` | 10 ms = 100 Hz pedidos al sensor |
 | `FC_WS_IMU_HZ` | Ritmo de telemetría hacia el navegador (50 Hz) |
 
 ---
 
-## 11. Relación con el resto del repositorio
+## 14. Relación con el resto del repositorio
 
 Este repositorio contenía **sólo** la app Android *A55 Super Zoom*
 (Kotlin + Gradle + CameraX). No había ni un archivo de ESP32, Arduino, OV5640

@@ -63,5 +63,3 @@ void         fcCameraCaptureRelease(camera_fb_t* fb);
 // Ajustes finos expuestos por la web (no rompen nada si el sensor los ignora).
 bool fcCameraSetFlip(bool vflip, bool hmirror);
 bool fcCameraGetFlip(bool* vflip, bool* hmirror);
-bool fcCameraAutofocusSupported();
-bool fcCameraTriggerAutofocus();

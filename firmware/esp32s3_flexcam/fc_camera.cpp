@@ -44,7 +44,7 @@ static char     s_lastError[64]      = {0};
 // protegidas, para no leer el estado interno del driver mientras se
 // reconfigura (deinit+init libera esa estructura).
 static uint16_t s_curW = 0, s_curH = 0;
-static bool     s_vflip = false, s_hmirror = false, s_afSupported = false;
+static bool     s_vflip = false, s_hmirror = false;
 
 // Ventana móvil para los FPS reales.
 static uint32_t s_fpsWindowStart = 0;
@@ -102,9 +102,8 @@ static void refreshCache() {
     s_curW = resolution[fs].width;
     s_curH = resolution[fs].height;
   }
-  s_vflip       = s->status.vflip != 0;
-  s_hmirror     = s->status.hmirror != 0;
-  s_afSupported = (s->af_is_supported && s->af_is_supported(s) > 0);
+  s_vflip   = s->status.vflip != 0;
+  s_hmirror = s->status.hmirror != 0;
 }
 
 static void applySensorTweaks(framesize_t fs) {
@@ -192,19 +191,27 @@ uint32_t fcCameraStreamGen() { return s_streamGen.load(std::memory_order_relaxed
 void     fcCameraBumpStreamGen() { s_streamGen.fetch_add(1, std::memory_order_relaxed); }
 
 // Reconfigura el driver. Debe llamarse con el mutex tomado y sin ningún
-// frame buffer prestado: esp_camera_reconfigure() hace deinit + init.
+// frame buffer prestado.
+//
+// Se hace con esp_camera_deinit() + esp_camera_init() a propósito, sin
+// esp_camera_reconfigure(): esa función es exactamente ese par de llamadas
+// por dentro, pero sólo está en versiones recientes del driver. Con deinit +
+// init el firmware compila igual en cualquier versión del core.
 static bool reconfigure(framesize_t fs, int quality, uint8_t fbCount,
                         char* errOut, size_t errLen) {
-  esp_camera_return_all();
+  esp_camera_deinit();               // libera buffers, DMA y el bus SCCB
   camera_config_t cfg;
   fillConfig(cfg, fs, quality, fbCount);
-  esp_err_t err = esp_camera_reconfigure(&cfg);
+  esp_err_t err = esp_camera_init(&cfg);
   if (err != ESP_OK) {
-    if (errOut) snprintf(errOut, errLen, "reconfigurar cámara falló: 0x%x", (int)err);
+    if (errOut) snprintf(errOut, errLen, "reconfigurar camara fallo: 0x%x", (int)err);
     // Intento de vuelta al modo anterior para no dejar la cámara muerta.
-    if (esp_camera_reconfigure(&s_cfg) != ESP_OK) {
+    esp_camera_deinit();
+    if (esp_camera_init(&s_cfg) != ESP_OK) {
       s_ready = false;
-      setError("cámara caída tras un cambio de modo");
+      setError("camara caida tras un cambio de modo");
+    } else {
+      applySensorTweaks(s_cfg.frame_size);
     }
     return false;
   }
@@ -388,12 +395,4 @@ bool fcCameraGetFlip(bool* vflip, bool* hmirror) {
   return s_ready;
 }
 
-bool fcCameraAutofocusSupported() { return s_afSupported; }
 
-bool fcCameraTriggerAutofocus() {
-  if (!s_ready || !fcCameraLock(1500)) return false;
-  sensor_t* s = esp_camera_sensor_get();
-  bool ok = (s && s->af_trigger) ? (s->af_trigger(s) >= 0) : false;
-  fcCameraUnlock();
-  return ok;
-}
