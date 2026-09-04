@@ -70,13 +70,25 @@ static void quatToEuler(float qi, float qj, float qk, float qr,
   *yaw = atan2f(t3, t4) * RAD_TO_DEG;
 }
 
-// Filtro: media exponencial sobre la diferencia angular más corta (para que
-// no pegue saltos al cruzar +-180) + zona muerta para que no tiemble parado.
-static inline float filterAngle(float prev, float raw, bool first) {
+// Filtro circular: nunca interpola atravesando 360 grados por el lado largo.
+static inline float filterAngle(float prev, float raw, bool first, float alpha) {
   if (first) return raw;
   float d = angDiff(raw, prev);
   if (fabsf(d) < FC_IMU_DEADZONE_DEG) return prev;
-  return wrap180(prev + d * FC_IMU_SMOOTH);
+  return wrap180(prev + d * alpha);
+}
+
+static inline int axisAbs(int axis) { return axis < 0 ? -axis : axis; }
+
+static float mappedAxis(int axis, float x, float y, float z) {
+  float value = 0.0f;
+  switch (axisAbs(axis)) {
+    case 1: value = x; break;
+    case 2: value = y; break;
+    case 3: value = z; break;
+    default: break;
+  }
+  return axis < 0 ? -value : value;
 }
 
 static bool enableReports() {
@@ -127,6 +139,7 @@ void fcImuGet(FcImuSample* out) {
       (millis() - out->lastUpdateMs) > FC_IMU_TIMEOUT_MS) {
     out->state = FC_IMU_STALE;
     out->hz = 0.0f;
+    out->horizonValid = false;
   }
 }
 
@@ -138,11 +151,18 @@ static void imuTask(void* arg) {
 
   bool     connected  = s_bootConnected;   // ya conectado desde fcImuBegin()
   bool     firstValue = true;
+  bool     firstHorizon = true;
+  float    previousHorizonWrapped = 0.0f;
   uint32_t lastTry    = 0;
   uint32_t lastData   = millis();
   uint32_t intSeen    = 0;      // cuántas veces el INT ha marcado dato listo
   uint32_t started    = millis();
-  if (connected) { local.state = FC_IMU_OK; s_useIntPin = (FC_IMU_INT >= 0); }
+  if (connected) {
+    local.state = FC_IMU_OK;
+    s_useIntPin = (FC_IMU_INT >= 0);
+    s_reportCount = 0;
+    s_hzWindow = millis();
+  }
   const TickType_t period = pdMS_TO_TICKS(1000 / FC_IMU_TASK_HZ);
 
   for (;;) {
@@ -156,13 +176,17 @@ static void imuTask(void* arg) {
         connected = tryConnect();
         if (connected) {
           firstValue = true;
+          firstHorizon = true;
           lastData   = millis();
           started    = millis();
           intSeen    = 0;
+          s_reportCount = 0;
+          s_hzWindow = millis();
           s_useIntPin = (FC_IMU_INT >= 0);
         } else {
           local.state = FC_IMU_ABSENT;
           local.hz = 0.0f;
+          local.horizonValid = false;
           publish(local);
         }
       }
@@ -208,6 +232,15 @@ static void imuTask(void* arg) {
         qk = s_bno.getQuatK();  qr = s_bno.getQuatReal();
         uint8_t acc = s_bno.getQuatAccuracy();
 #endif
+        // Normalizar una sola vez. El BNO suele entregar norma 1, pero una
+        // lectura incompleta no debe producir NaN ni un salto de 180°.
+        float qn = sqrtf(qi * qi + qj * qj + qk * qk + qr * qr);
+        if (qn < 1e-6f) {
+          vTaskDelay(period ? period : 1);
+          continue;
+        }
+        qi /= qn; qj /= qn; qk /= qn; qr /= qn;
+
         float r, p, y;
         quatToEuler(qi, qj, qk, qr, &r, &p, &y);
 #if FC_IMU_INVERT_ROLL
@@ -219,13 +252,41 @@ static void imuTask(void* arg) {
 #if FC_IMU_INVERT_YAW
         y = -y;
 #endif
-        local.roll  = filterAngle(local.roll,  r, firstValue);
-        local.pitch = filterAngle(local.pitch, p, firstValue);
-        local.yaw   = filterAngle(local.yaw,   y, firstValue);
+        local.roll  = filterAngle(local.roll,  r, firstValue, FC_IMU_SMOOTH);
+        local.pitch = filterAngle(local.pitch, p, firstValue, FC_IMU_SMOOTH);
+        local.yaw   = filterAngle(local.yaw,   y, firstValue, FC_IMU_SMOOTH);
         local.qi = qi; local.qj = qj; local.qk = qk; local.qr = qr;
+
+        // Gravedad expresada en coordenadas del BNO085 (R^T * [0,0,1]).
+        // Proyectarla sobre derecha/abajo de la imagen evita el gimbal lock
+        // de usar un Euler "roll" y funciona al cruzar 90°/180°/360°.
+        local.gravityX = 2.0f * (qi * qk - qr * qj);
+        local.gravityY = 2.0f * (qj * qk + qr * qi);
+        local.gravityZ = 1.0f - 2.0f * (qi * qi + qj * qj);
+        float gRight = mappedAxis(FC_IMU_CAMERA_RIGHT_AXIS,
+                                  local.gravityX, local.gravityY, local.gravityZ);
+        float gDown = mappedAxis(FC_IMU_CAMERA_DOWN_AXIS,
+                                 local.gravityX, local.gravityY, local.gravityZ);
+        local.horizonConfidence = sqrtf(gRight * gRight + gDown * gDown);
+        local.horizonValid = local.horizonConfidence >= FC_IMU_HORIZON_MIN_PROJECTION;
+        if (local.horizonValid) {
+          float rawHorizon = wrap180(atan2f(gRight, gDown) * RAD_TO_DEG *
+                                     FC_IMU_HORIZON_SIGN);
+          float filtered = filterAngle(previousHorizonWrapped, rawHorizon,
+                                       firstHorizon, FC_HORIZON_SMOOTH);
+          if (firstHorizon) {
+            local.horizon = filtered;
+          } else {
+            local.horizon += angDiff(filtered, previousHorizonWrapped);
+          }
+          local.horizonWrapped = filtered;
+          previousHorizonWrapped = filtered;
+          firstHorizon = false;
+        }
         local.accuracy = acc;
         local.state = FC_IMU_OK;
         local.lastUpdateMs = millis();
+        local.sequence++;
         firstValue = false;
         lastData = local.lastUpdateMs;
 
@@ -245,6 +306,7 @@ static void imuTask(void* arg) {
     if (millis() - lastData > FC_IMU_TIMEOUT_MS) {
       local.state = FC_IMU_STALE;
       local.hz = 0.0f;
+      local.horizonValid = false;
       publish(local);
       if (!s_bno.isConnected()) {
         Serial.println(F("[IMU] BNO085 desaparecido del bus, reintentando."));
@@ -263,6 +325,13 @@ static void imuTask(void* arg) {
 }
 
 bool fcImuBegin() {
+  const int rightAxis = axisAbs(FC_IMU_CAMERA_RIGHT_AXIS);
+  const int downAxis = axisAbs(FC_IMU_CAMERA_DOWN_AXIS);
+  if (rightAxis < 1 || rightAxis > 3 || downAxis < 1 || downAxis > 3 ||
+      rightAxis == downAxis) {
+    Serial.println(F("[IMU] ERROR: ejes cámara-IMU inválidos en fc_config.h."));
+    return false;
+  }
   FC_IMU_WIRE.begin(FC_IMU_SDA, FC_IMU_SCL, FC_IMU_I2C_HZ);
   FC_IMU_WIRE.setTimeOut(50);          // ms; un bus colgado no bloquea la tarea
   if (FC_IMU_INT >= 0) pinMode(FC_IMU_INT, INPUT_PULLUP);

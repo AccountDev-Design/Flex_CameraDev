@@ -12,7 +12,9 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
+#include <esp_timer.h>
 #include <stdarg.h>
+#include <math.h>
 
 static httpd_handle_t s_web    = nullptr;
 static httpd_handle_t s_stream = nullptr;
@@ -68,18 +70,22 @@ static size_t buildState(char* buf, size_t cap, const char* errMsg) {
 
   size_t n = 0;
   appendf(buf, cap, &n, "{\"mode\":%d,\"label\":\"%s\",\"w\":%u,\"h\":%u,"
-          "\"camReady\":%s,\"pid\":%u,\"fps\":%.1f,\"flip\":%d,\"af\":%d,\"modes\":[",
+          "\"camReady\":%s,\"pid\":%u,\"fps\":%.1f,\"sendFps\":%.1f,"
+          "\"targetFps\":%u,\"flip\":%d,\"af\":%d,\"modes\":[",
           (int)cs.mode, spec->label, cs.width, cs.height,
-          cs.ready ? "true" : "false", cs.sensorPid, cs.fps,
+          cs.ready ? "true" : "false", cs.sensorPid, cs.fps, cs.sendFps,
+          (unsigned)cs.targetFps,
           vf ? 1 : 0, fcCameraAutofocusSupported() ? 1 : 0);
   for (int i = 0; i < FC_MODE_COUNT; i++) {
     const FcModeSpec* m = &FC_MODES[i];
-    uint16_t cw = resolution[m->capture].width, ch = resolution[m->capture].height;
-    uint16_t pw = resolution[m->preview].width, ph = resolution[m->preview].height;
+    uint16_t cw = 0, ch = 0, pw = 0, ph = 0;
+    fcCameraModeCaptureSize((FcMode)i, &cw, &ch);
+    fcCameraModePreviewSize((FcMode)i, &pw, &ph);
     appendf(buf, cap, &n,
             "%s{\"id\":\"%s\",\"label\":\"%s\",\"prev\":\"%ux%u\","
-            "\"captureLabel\":\"%ux%u\",\"horizon\":%s}",
+            "\"captureLabel\":\"%ux%u\",\"targetFps\":%u,\"horizon\":%s}",
             i ? "," : "", m->id, m->label, pw, ph, cw, ch,
+            (unsigned)m->targetFps,
             m->horizonHint ? "true" : "false");
   }
   appendf(buf, cap, &n, "]");
@@ -90,9 +96,9 @@ static size_t buildState(char* buf, size_t cap, const char* errMsg) {
 }
 
 static esp_err_t sendState(httpd_req_t* req, const char* errMsg) {
-  char* buf = (char*)malloc(1600);
+  char* buf = (char*)malloc(2600);
   if (!buf) { httpd_resp_send_500(req); return ESP_FAIL; }
-  size_t n = buildState(buf, 1600, errMsg);
+  size_t n = buildState(buf, 2600, errMsg);
   noCache(req);
   httpd_resp_set_type(req, "application/json");
   esp_err_t r = httpd_resp_send(req, buf, n);
@@ -136,22 +142,29 @@ static esp_err_t flipHandler(httpd_req_t* req) {
 
 static esp_err_t photoHandler(httpd_req_t* req) {
   char err[80] = {0};
-  camera_fb_t* fb = fcCameraCapture(err, sizeof(err));
-  if (!fb) {
+  FcPhoto photo = {};
+  if (!fcCameraCapture(&photo, err, sizeof(err))) {
     noCache(req);
     httpd_resp_set_status(req, "503 Service Unavailable");
     httpd_resp_set_type(req, "text/plain; charset=utf-8");
     httpd_resp_send(req, err[0] ? err : "no se pudo capturar", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
   }
-  char disp[64];
-  snprintf(disp, sizeof(disp), "inline; filename=flexcam_%lu.jpg",
-           (unsigned long)(millis() / 1000));
+  char disp[96];
+  char width[12], height[12], length[20];
+  snprintf(disp, sizeof(disp), "inline; filename=flexcam_%ux%u_%lu.jpg",
+           photo.width, photo.height, (unsigned long)(millis() / 1000));
+  snprintf(width, sizeof(width), "%u", photo.width);
+  snprintf(height, sizeof(height), "%u", photo.height);
+  snprintf(length, sizeof(length), "%u", (unsigned)photo.len);
   noCache(req);
   httpd_resp_set_type(req, "image/jpeg");
   httpd_resp_set_hdr(req, "Content-Disposition", disp);
-  esp_err_t r = httpd_resp_send(req, (const char*)fb->buf, fb->len);
-  fcCameraCaptureRelease(fb);          // devuelve el buffer y suelta el mutex
+  httpd_resp_set_hdr(req, "X-FlexCam-Width", width);
+  httpd_resp_set_hdr(req, "X-FlexCam-Height", height);
+  httpd_resp_set_hdr(req, "X-FlexCam-Bytes", length);
+  esp_err_t r = httpd_resp_send(req, (const char*)photo.data, photo.len);
+  fcCameraPhotoRelease(&photo);
   return r;
 }
 
@@ -240,7 +253,9 @@ static void telemetryTask(void* arg) {
   (void)arg;
   const TickType_t period = pdMS_TO_TICKS(1000 / FC_WS_IMU_HZ);
   uint32_t lastStats = 0;
-  char buf[352];
+  uint32_t lastImuSequence = UINT32_MAX;
+  uint32_t lastImuBroadcast = 0;
+  char buf[640];
   for (;;) {
     if (fcServerWsClients() == 0) {        // nadie mirando: no gastar CPU
       vTaskDelay(pdMS_TO_TICKS(120));
@@ -248,28 +263,55 @@ static void telemetryTask(void* arg) {
     }
     FcImuSample s;
     fcImuGet(&s);
-    int n = snprintf(buf, sizeof(buf),
-        "{\"t\":\"i\",\"r\":%.2f,\"p\":%.2f,\"y\":%.2f,\"hz\":%.0f,\"a\":%u,"
-        "\"ok\":%d,\"s\":\"%s\",\"rs\":%lu}",
-        s.roll, s.pitch, s.yaw, s.hz, (unsigned)s.accuracy,
-        (s.state == FC_IMU_OK) ? 1 : 0, fcImuStateText(s.state),
-        (unsigned long)s.resets);
-    if (n > 0) wsBroadcast(buf, (size_t)n);
-
+    int n = 0;
     uint32_t now = millis();
+    // No llenar la cola TCP repitiendo la misma muestra. Si llegan 100 Hz del
+    // BNO085 se envía siempre la más nueva, con techo de FC_WS_IMU_HZ.
+    if (s.sequence != lastImuSequence || now - lastImuBroadcast >= 500) {
+      lastImuSequence = s.sequence;
+      lastImuBroadcast = now;
+      n = snprintf(buf, sizeof(buf),
+          "{\"t\":\"i\",\"r\":%.2f,\"p\":%.2f,\"y\":%.2f,"
+          "\"h\":%.3f,\"hw\":%.3f,\"hc\":%.3f,\"hv\":%d,"
+          "\"qi\":%.5f,\"qj\":%.5f,\"qk\":%.5f,\"qr\":%.5f,"
+          "\"gx\":%.4f,\"gy\":%.4f,\"gz\":%.4f,"
+          "\"hz\":%.0f,\"a\":%u,\"ok\":%d,\"s\":\"%s\","
+          "\"rs\":%lu,\"seq\":%lu}",
+          s.roll, s.pitch, s.yaw, s.horizon, s.horizonWrapped,
+          s.horizonConfidence, s.horizonValid ? 1 : 0,
+          s.qi, s.qj, s.qk, s.qr,
+          s.gravityX, s.gravityY, s.gravityZ,
+          s.hz, (unsigned)s.accuracy,
+          (s.state == FC_IMU_OK) ? 1 : 0, fcImuStateText(s.state),
+          (unsigned long)s.resets, (unsigned long)s.sequence);
+      if (n > 0 && (size_t)n < sizeof(buf)) wsBroadcast(buf, (size_t)n);
+    }
+
     if (now - lastStats >= FC_WS_STATS_MS) {
       lastStats = now;
       FcCamStatus cs;
       fcCameraGetStatus(&cs);
       n = snprintf(buf, sizeof(buf),
-          "{\"t\":\"s\",\"fps\":%.1f,\"w\":%u,\"h\":%u,\"mode\":%d,\"cam\":%d,"
-          "\"cli\":%lu,\"heap\":%lu,\"ps\":%lu,\"drop\":%lu,\"up\":%lu}",
-          cs.fps, cs.width, cs.height, (int)cs.mode, cs.ready ? 1 : 0,
+          "{\"t\":\"s\",\"fps\":%.1f,\"sfps\":%.1f,\"tfps\":%u,"
+          "\"w\":%u,\"h\":%u,\"mode\":%d,\"cam\":%d,"
+          "\"cli\":%lu,\"heap\":%lu,\"largest\":%lu,\"ps\":%lu,"
+          "\"drop\":%lu,\"pdrop\":%lu,\"capms\":%.1f,\"sendms\":%.1f,"
+          "\"bytes\":%lu,\"age\":%lu,\"temp\":%.1f,\"thermal\":%u,"
+          "\"captured\":%lu,\"sent\":%lu,\"up\":%lu}",
+          cs.fps, cs.sendFps, (unsigned)cs.targetFps,
+          cs.width, cs.height, (int)cs.mode, cs.ready ? 1 : 0,
           (unsigned long)cs.clients,
           (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+          (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
           (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-          (unsigned long)cs.dropped, (unsigned long)(now / 1000));
-      if (n > 0) wsBroadcast(buf, (size_t)n);
+          (unsigned long)cs.dropped, (unsigned long)cs.poolDropped,
+          cs.captureMs, cs.sendMs,
+          (unsigned long)cs.lastFrameBytes, (unsigned long)cs.lastFrameAgeMs,
+          isfinite(cs.temperatureC) ? cs.temperatureC : -127.0f,
+          (unsigned)cs.thermalLevel,
+          (unsigned long)cs.framesCaptured, (unsigned long)cs.framesSent,
+          (unsigned long)(now / 1000));
+      if (n > 0 && (size_t)n < sizeof(buf)) wsBroadcast(buf, (size_t)n);
     }
     vTaskDelay(period ? period : 1);
   }
@@ -284,49 +326,39 @@ static esp_err_t streamHandler(httpd_req_t* req) {
   if (res != ESP_OK) return res;
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-  httpd_resp_set_hdr(req, "X-Framerate", "60");
+  char fpsHeader[8];
+  snprintf(fpsHeader, sizeof(fpsHeader), "%u", (unsigned)fcCameraTargetFps());
+  httpd_resp_set_hdr(req, "X-Framerate", fpsHeader);
   httpd_resp_set_hdr(req, "Connection", "close");
 
   fcCameraClientEnter();
   char part[80];
+  uint32_t lastSequence = 0;
 
   while (true) {
-    // El cambio de modo o el disparo suben la generación: salir en limpio.
     if (fcCameraStreamGen() != myGen) break;
 
-    if (!fcCameraLock(1500)) {           // otro está reconfigurando
-      if (fcCameraStreamGen() != myGen) break;
-      vTaskDelay(pdMS_TO_TICKS(30));
+    FcStreamFrame frame = {};
+    if (!fcCameraAcquireLatest(lastSequence, &frame)) {
+      // No existe cola: se espera el próximo latest-frame sin bloquear cámara.
+      vTaskDelay(pdMS_TO_TICKS(3));
       continue;
     }
 
-    camera_fb_t* fb = esp_camera_fb_get();
-    if (!fb || fb->len == 0) {
-      if (fb) esp_camera_fb_return(fb);
-      fcCameraUnlock();
-      fcCameraNoteDrop();
-      vTaskDelay(pdMS_TO_TICKS(20));
-      continue;
-    }
-    if (fb->format != PIXFORMAT_JPEG) {  // no debería pasar: siempre JPEG
-      esp_camera_fb_return(fb);
-      fcCameraUnlock();
-      fcCameraNoteDrop();
-      continue;
-    }
-
-    size_t hlen = snprintf(part, sizeof(part), STREAM_PART, (unsigned)fb->len);
+    lastSequence = frame.sequence;
+    size_t hlen = snprintf(part, sizeof(part), STREAM_PART, (unsigned)frame.len);
+    uint64_t sendStarted = esp_timer_get_time();
     res = httpd_resp_send_chunk(req, STREAM_BOUNDARY, strlen(STREAM_BOUNDARY));
     if (res == ESP_OK) res = httpd_resp_send_chunk(req, part, hlen);
-    if (res == ESP_OK) res = httpd_resp_send_chunk(req, (const char*)fb->buf, fb->len);
-
-    size_t sent = fb->len;
-    esp_camera_fb_return(fb);
-    fcCameraUnlock();
+    if (res == ESP_OK)
+      res = httpd_resp_send_chunk(req, (const char*)frame.data, frame.len);
+    uint32_t sendMs = (uint32_t)((esp_timer_get_time() - sendStarted) / 1000ULL);
+    size_t sent = frame.len;
+    fcCameraReleaseFrame(&frame);
 
     if (res != ESP_OK) break;            // cliente cerrado: se sale y se limpia
-    fcCameraNoteFrame(sent);
-    vTaskDelay(1);                       // deja respirar al watchdog del núcleo 0
+    fcCameraNoteFrame(sent, sendMs);
+    taskYIELD();
   }
 
   fcCameraClientExit();
@@ -361,7 +393,7 @@ bool fcServerBegin() {
   cw.core_id          = 0;
   cw.close_fn         = onSocketClose;
   cw.recv_wait_timeout = 5;
-  cw.send_wait_timeout = 5;
+  cw.send_wait_timeout = 1;
 
   if (httpd_start(&s_web, &cw) != ESP_OK) {
     Serial.println(F("[WEB] No se pudo arrancar el servidor del puerto 80."));
@@ -384,7 +416,7 @@ bool fcServerBegin() {
   cs.lru_purge_enable = true;
   cs.core_id          = 0;
   cs.recv_wait_timeout = 3;
-  cs.send_wait_timeout = 3;           // acota cuánto puede bloquear un móvil lento
+  cs.send_wait_timeout = 2;           // cliente trabado sale; cámara sigue capturando
 
   if (httpd_start(&s_stream, &cs) != ESP_OK) {
     Serial.println(F("[WEB] No se pudo arrancar el servidor MJPEG del puerto 81."));

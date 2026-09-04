@@ -11,3 +11,4 @@
 void fcSysBanner();
 void fcSysMemoria(const char* cuando);
 bool fcSysWifiAP();
+float fcSysTemperatureC();

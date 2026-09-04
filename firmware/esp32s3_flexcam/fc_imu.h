@@ -18,11 +18,17 @@ struct FcImuSample {
   float      pitch;     // grados, -90..90
   float      yaw;       // grados, -180..180
   float      qi, qj, qk, qr;
+  float      gravityX, gravityY, gravityZ;
+  float      horizon;          // ángulo continuo: admite varias vueltas
+  float      horizonWrapped;   // el mismo ángulo en -180..180
+  float      horizonConfidence;// 0..1; cae al mirar verticalmente arriba/abajo
   float      hz;        // frecuencia real de informes del sensor
   uint8_t    accuracy;  // 0..3 (calibración que reporta el BNO085)
+  bool       horizonValid;
   FcImuState state;
   uint32_t   lastUpdateMs;
   uint32_t   resets;    // veces que el sensor se ha reiniciado solo
+  uint32_t   sequence;  // aumenta sólo cuando llega un informe nuevo
 };
 
 // Arranca I2C y la tarea. Devuelve false si el sensor no aparece, pero la
