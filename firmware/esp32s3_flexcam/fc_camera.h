@@ -14,7 +14,6 @@ struct FcModeSpec {
   framesize_t capture;       // resolución del disparo
   int         previewQuality;// 0..63 (menor = mejor calidad, más bytes)
   int         captureQuality;
-  uint8_t     fbCount;       // buffers de la cámara en PSRAM
   bool        horizonHint;   // la web enciende Horizon Lock al entrar
 };
 
@@ -56,7 +55,7 @@ void  fcCameraClientEnter();
 void  fcCameraClientExit();
 
 // Disparo. Deja el fb reservado: hay que devolverlo con esp_camera_fb_return().
-// Si el modo pide una resolución de captura distinta, reconfigura y restaura.
+// Si el modo pide una resolución de captura distinta, cambia el sensor y restaura.
 camera_fb_t* fcCameraCapture(char* errOut, size_t errLen);
 void         fcCameraCaptureRelease(camera_fb_t* fb);
 
